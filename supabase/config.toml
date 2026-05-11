@@ -1,0 +1,13 @@
+project_id = "coreflow-pdv"
+
+[functions.emitir-nfce]
+verify_jwt = true
+
+[functions.cancelar-nfce]
+verify_jwt = true
+
+[functions.consultar-nfce]
+verify_jwt = true
+
+[functions.reenviar-nfce]
+verify_jwt = true
