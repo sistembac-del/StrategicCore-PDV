@@ -637,7 +637,25 @@ export async function finalizeRemoteSale(input: {
 export async function createRemoteProduct(input: ProductInput) {
   if (!supabase) throw new Error("Supabase não configurado.");
 
-  const payload = {
+  const payload = productInputToPayload(input);
+
+  const { data, error } = await supabase.from("produtos").insert(payload).select("*").single();
+  if (error) throw error;
+  return mapProduct(data);
+}
+
+export async function createRemoteProducts(inputs: ProductInput[]) {
+  if (!supabase) throw new Error("Supabase nÃ£o configurado.");
+  if (!inputs.length) return [];
+
+  const payload = inputs.map(productInputToPayload);
+  const { data, error } = await supabase.from("produtos").insert(payload).select("*");
+  if (error) throw error;
+  return (data ?? []).map(mapProduct);
+}
+
+function productInputToPayload(input: ProductInput) {
+  return {
     empresa_id: input.empresaId,
     codigo: input.codigo.trim(),
     codigo_barras: input.codigoBarras?.trim() || null,
@@ -659,10 +677,6 @@ export async function createRemoteProduct(input: ProductInput) {
     unidade_comercial_fiscal: input.unidadeComercialFiscal || input.unidade || "UN",
     ativo: true
   };
-
-  const { data, error } = await supabase.from("produtos").insert(payload).select("*").single();
-  if (error) throw error;
-  return mapProduct(data);
 }
 
 export async function setRemoteProductActive(productId: string, ativo: boolean) {

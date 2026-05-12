@@ -44,6 +44,7 @@ import {
   createRetailerFromCoreAdmin,
   createUserFromCoreAdmin,
   createRemoteProduct,
+  createRemoteProducts,
   createRemoteCustomer,
   createRemoteStockMovement,
   createCompanyUser,
@@ -280,6 +281,146 @@ const statusTone: Record<FiscalStatus, string> = {
   CONTINGENCIA: "warning",
   NAO_EMITIDA: "muted"
 };
+
+type CsvProductImport = {
+  valid: Omit<ProductInput, "empresaId">[];
+  errors: string[];
+};
+
+const normalizeCsvKey = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+
+const csvColumnAliases: Record<string, string[]> = {
+  codigo: ["codigo", "codigo_interno", "sku"],
+  codigoBarras: ["codigo_barras", "cod_barras", "barras", "ean", "gtin"],
+  descricao: ["descricao", "descrição", "nome", "produto"],
+  categoria: ["categoria", "grupo"],
+  marca: ["marca", "fabricante"],
+  precoCusto: ["preco_custo", "preço_custo", "custo"],
+  precoVenda: ["preco_venda", "preço_venda", "preco", "preço", "venda"],
+  estoqueAtual: ["estoque_atual", "estoque", "saldo"],
+  estoqueMinimo: ["estoque_minimo", "estoque_mínimo", "minimo", "mínimo"],
+  unidade: ["unidade", "un"],
+  ncm: ["ncm"],
+  cest: ["cest"],
+  cfop: ["cfop"],
+  origem: ["origem"],
+  csosn: ["csosn"],
+  cst: ["cst"],
+  aliquotaIcms: ["aliquota_icms", "alíquota_icms", "icms"],
+  unidadeComercialFiscal: ["unidade_comercial_fiscal", "unidade_fiscal", "un_fiscal"]
+};
+
+function parseCsvRows(text: string, delimiter: "," | ";") {
+  const rows: string[][] = [];
+  let current = "";
+  let row: string[] = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === "\"" && inQuotes && next === "\"") {
+      current += "\"";
+      index += 1;
+      continue;
+    }
+
+    if (char === "\"") {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === delimiter && !inQuotes) {
+      row.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(current.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  row.push(current.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+function parseCsvNumber(value: string | undefined, fallback = 0) {
+  if (!value) return fallback;
+  const normalized = value.replace(/\./g, "").replace(",", ".").replace(/[^0-9.-]/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseProductsCsv(text: string): CsvProductImport {
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+  const delimiter = (firstLine.match(/;/g)?.length ?? 0) >= (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
+  const rows = parseCsvRows(text, delimiter);
+  const [header, ...dataRows] = rows;
+  const errors: string[] = [];
+  const valid: Omit<ProductInput, "empresaId">[] = [];
+
+  if (!header?.length) return { valid, errors: ["CSV sem cabeçalho."] };
+
+  const normalizedHeader = header.map(normalizeCsvKey);
+  const getCell = (row: string[], field: keyof typeof csvColumnAliases) => {
+    const index = csvColumnAliases[field].map(normalizeCsvKey).map((alias) => normalizedHeader.indexOf(alias)).find((position) => position >= 0);
+    return index === undefined ? "" : row[index]?.trim() ?? "";
+  };
+
+  dataRows.forEach((row, rowIndex) => {
+    const line = rowIndex + 2;
+    const codigo = getCell(row, "codigo");
+    const descricao = getCell(row, "descricao");
+    const precoVenda = parseCsvNumber(getCell(row, "precoVenda"), NaN);
+    const ncm = getCell(row, "ncm");
+    const cfop = getCell(row, "cfop") || "5102";
+
+    if (!codigo || !descricao || !Number.isFinite(precoVenda) || precoVenda <= 0 || !ncm) {
+      errors.push(`Linha ${line}: código, descrição, preço de venda e NCM são obrigatórios.`);
+      return;
+    }
+
+    valid.push({
+      codigo,
+      codigoBarras: getCell(row, "codigoBarras"),
+      descricao,
+      categoria: getCell(row, "categoria"),
+      marca: getCell(row, "marca"),
+      precoCusto: parseCsvNumber(getCell(row, "precoCusto"), 0),
+      precoVenda,
+      estoqueAtual: parseCsvNumber(getCell(row, "estoqueAtual"), 0),
+      estoqueMinimo: parseCsvNumber(getCell(row, "estoqueMinimo"), 0),
+      unidade: getCell(row, "unidade") || "UN",
+      ncm,
+      cest: getCell(row, "cest"),
+      cfop,
+      origem: getCell(row, "origem") || "0",
+      csosn: getCell(row, "csosn") || "102",
+      cst: getCell(row, "cst"),
+      aliquotaIcms: getCell(row, "aliquotaIcms") ? parseCsvNumber(getCell(row, "aliquotaIcms")) : undefined,
+      unidadeComercialFiscal: getCell(row, "unidadeComercialFiscal") || getCell(row, "unidade") || "UN"
+    });
+  });
+
+  return { valid, errors };
+}
 
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -557,6 +698,31 @@ export function App() {
     setToast(error ? error.message : `Solicitação enviada para ${action}.`);
   }
 
+  function buildLocalProduct(input: Omit<ProductInput, "empresaId">): Product {
+    return {
+      id: crypto.randomUUID(),
+      codigo: input.codigo,
+      codigoBarras: input.codigoBarras ?? "",
+      descricao: input.descricao,
+      categoria: input.categoria ?? "",
+      marca: input.marca ?? "",
+      precoCusto: input.precoCusto,
+      precoVenda: input.precoVenda,
+      margem: input.precoCusto > 0 ? ((input.precoVenda - input.precoCusto) / input.precoCusto) * 100 : 0,
+      estoqueAtual: input.estoqueAtual,
+      estoqueMinimo: input.estoqueMinimo,
+      unidade: input.unidade,
+      ncm: input.ncm,
+      cest: input.cest,
+      cfop: input.cfop,
+      origem: input.origem,
+      csosn: input.csosn,
+      cst: input.cst,
+      aliquotaIcms: input.aliquotaIcms,
+      ativo: true
+    };
+  }
+
   async function handleCreateProduct(input: Omit<ProductInput, "empresaId">) {
     if (remoteMode && companyContext) {
       const licenseMessage = licenseBlockMessage(companyContext);
@@ -597,8 +763,34 @@ export function App() {
       aliquotaIcms: input.aliquotaIcms,
       ativo: true
     };
-    setProducts((current) => [product, ...current]);
+    setProducts((current) => [buildLocalProduct(input), ...current]);
     setToast("Produto cadastrado no modo demonstração.");
+  }
+
+  async function handleImportProducts(inputs: Omit<ProductInput, "empresaId">[]) {
+    if (!inputs.length) return setToast("Nenhum produto válido para importar.");
+
+    if (remoteMode && companyContext) {
+      const licenseMessage = licenseBlockMessage(companyContext);
+      if (licenseMessage) return setToast(`Importação bloqueada: ${licenseMessage}`);
+      const available = Math.max(0, (companyContext.license?.limiteProdutos ?? 0) - (companyContext.license?.produtosAtivos ?? products.length));
+      if (inputs.length > available) {
+        return setToast(`Importação bloqueada: o plano permite mais ${available} produto(s) ativos.`);
+      }
+
+      try {
+        const imported = await createRemoteProducts(inputs.map((input) => ({ ...input, empresaId: companyContext.empresaId })));
+        setProducts((current) => [...imported, ...current]);
+        await refreshRemoteData();
+        setToast(`${imported.length} produto(s) importado(s) com sucesso.`);
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : "Falha ao importar produtos.");
+      }
+      return;
+    }
+
+    setProducts((current) => [...inputs.map(buildLocalProduct), ...current]);
+    setToast(`${inputs.length} produto(s) importado(s) no modo demonstração.`);
   }
 
   async function handleToggleProduct(product: Product) {
@@ -801,7 +993,7 @@ export function App() {
           />
         )}
         {activeModule === "produtos" && (
-          <ProductsModule products={products} onCreateProduct={handleCreateProduct} onToggleProduct={handleToggleProduct} canManage={canEdit(companyContext?.perfil, "products") && canOperateByLicense} />
+          <ProductsModule products={products} onCreateProduct={handleCreateProduct} onImportProducts={handleImportProducts} onToggleProduct={handleToggleProduct} canManage={canEdit(companyContext?.perfil, "products") && canOperateByLicense} />
         )}
         {activeModule === "estoque" && (
           <StockModule products={products} movements={stockMovements} onCreateMovement={handleCreateStockMovement} canManage={canEdit(companyContext?.perfil, "stock") && canOperateByLicense} />
@@ -1972,18 +2164,23 @@ function CartPanel(props: {
 function ProductsModule({
   products,
   onCreateProduct,
+  onImportProducts,
   onToggleProduct,
   canManage
 }: {
   products: Product[];
   onCreateProduct: (input: Omit<ProductInput, "empresaId">) => void;
+  onImportProducts: (inputs: Omit<ProductInput, "empresaId">[]) => void;
   onToggleProduct: (product: Product) => void;
   canManage: boolean;
 }) {
   return (
     <div className="two-column">
       {canManage ? (
-        <ProductForm onCreateProduct={onCreateProduct} />
+        <div className="product-tools-column">
+          <ProductImportPanel onImportProducts={onImportProducts} />
+          <ProductForm onCreateProduct={onCreateProduct} />
+        </div>
       ) : (
         <Panel title="Produtos" icon={Package}>
           <p className="hint">Seu cargo permite consultar produtos, mas nao cadastrar ou alterar status.</p>
@@ -2019,6 +2216,60 @@ function ProductsModule({
         </div>
       </Panel>
     </div>
+  );
+}
+
+function ProductImportPanel({ onImportProducts }: { onImportProducts: (inputs: Omit<ProductInput, "empresaId">[]) => void }) {
+  const [fileName, setFileName] = useState("");
+  const [parsed, setParsed] = useState<CsvProductImport>({ valid: [], errors: [] });
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setFileName(file.name);
+    const text = await file.text();
+    setParsed(parseProductsCsv(text));
+  }
+
+  return (
+    <Panel title="Importar produtos CSV" icon={FileText}>
+      <div className="import-box">
+        <label className="file-drop">
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(event) => handleFile(event.target.files?.[0])}
+          />
+          <span>{fileName || "Selecionar arquivo CSV"}</span>
+        </label>
+        <p className="hint">
+          Colunas aceitas: codigo, codigo_barras, descricao, categoria, marca, preco_custo, preco_venda, estoque_atual, estoque_minimo, unidade, ncm, cest, cfop, origem, csosn, cst.
+        </p>
+        <div className="import-summary">
+          <span className="badge success">{parsed.valid.length} válido(s)</span>
+          <span className={`badge ${parsed.errors.length ? "danger" : "neutral"}`}>{parsed.errors.length} erro(s)</span>
+        </div>
+        {parsed.errors.length > 0 && (
+          <div className="import-errors">
+            {parsed.errors.slice(0, 4).map((error) => (
+              <span key={error}>{error}</span>
+            ))}
+            {parsed.errors.length > 4 && <span>Mais {parsed.errors.length - 4} erro(s).</span>}
+          </div>
+        )}
+        <button
+          className="primary-button full"
+          type="button"
+          disabled={!parsed.valid.length}
+          onClick={() => {
+            onImportProducts(parsed.valid);
+            setParsed({ valid: [], errors: [] });
+            setFileName("");
+          }}
+        >
+          Importar produtos válidos
+        </button>
+      </div>
+    </Panel>
   );
 }
 

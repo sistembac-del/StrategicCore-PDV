@@ -366,6 +366,45 @@ img {
   gap: 10px;
 }
 
+.product-tools-column,
+.import-box,
+.import-errors {
+  display: grid;
+  gap: 10px;
+}
+
+.file-drop {
+  display: grid;
+  place-items: center;
+  min-height: 88px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: rgba(17, 134, 255, 0.08);
+  color: var(--silver);
+  cursor: pointer;
+  text-align: center;
+  font-weight: 900;
+}
+
+.file-drop input {
+  display: none;
+}
+
+.import-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.import-errors {
+  border: 1px solid rgba(255, 92, 115, 0.32);
+  border-radius: 8px;
+  background: rgba(255, 92, 115, 0.08);
+  color: var(--silver);
+  font-size: 0.78rem;
+  padding: 10px;
+}
+
 .product-admin-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 130px auto auto;
