@@ -123,6 +123,276 @@ img {
   backdrop-filter: blur(18px);
 }
 
+.admin-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(17, 134, 255, 0.18), rgba(35, 193, 255, 0.06)),
+    var(--panel);
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.admin-hero h2 {
+  margin: 5px 0;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+}
+
+.admin-hero p {
+  margin: 0;
+  color: var(--silver);
+  font-weight: 800;
+}
+
+.admin-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.license-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+}
+
+.license-banner.success {
+  border-color: rgba(32, 201, 151, 0.36);
+}
+
+.license-banner.warning {
+  border-color: rgba(255, 184, 77, 0.48);
+}
+
+.license-banner.danger {
+  border-color: rgba(255, 92, 115, 0.52);
+}
+
+.license-banner strong,
+.license-banner p {
+  display: block;
+  margin: 0;
+}
+
+.license-banner p,
+.license-banner-metrics {
+  color: var(--silver);
+  font-size: 0.84rem;
+}
+
+.license-banner-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.license-banner-metrics span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.core-admin-form {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.entity-form {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-form {
+  margin-bottom: 14px;
+}
+
+.core-admin-form h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 0.98rem;
+}
+
+.inline-fields {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 8px;
+}
+
+.access-list {
+  display: grid;
+  gap: 10px;
+}
+
+.onboarding-list,
+.permission-matrix,
+.license-list,
+.billing-list {
+  display: grid;
+  gap: 10px;
+}
+
+.onboarding-row,
+.permission-row,
+.license-row,
+.billing-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px;
+}
+
+.onboarding-row {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.permission-row {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.permission-row.header {
+  background: var(--panel-strong);
+  color: var(--silver);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.permission-row div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.license-heading,
+.license-usage,
+.billing-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.license-heading strong,
+.license-heading span,
+.billing-heading strong,
+.billing-heading span {
+  display: block;
+}
+
+.license-heading > div > span,
+.billing-heading > div > span,
+.license-usage {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.license-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 140px 140px 110px 120px;
+  gap: 8px;
+}
+
+.license-controls.notes {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.billing-main {
+  display: grid;
+  grid-template-columns: 130px 140px 110px 150px;
+  gap: 8px;
+  align-items: center;
+}
+
+.billing-main.notes {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.danger-text {
+  color: var(--red) !important;
+  font-weight: 900;
+}
+
+.onboarding-row strong,
+.onboarding-row span {
+  display: block;
+}
+
+.onboarding-row > div > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 3px;
+}
+
+.access-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.access-row strong,
+.access-row span {
+  display: block;
+}
+
+.product-admin-list {
+  display: grid;
+  gap: 10px;
+}
+
+.product-admin-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px auto auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 12px;
+}
+
+.product-admin-row strong,
+.product-admin-row small {
+  display: block;
+}
+
+.product-admin-row small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  margin-top: 4px;
+}
+
+.access-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .login-card {
   display: grid;
   gap: 18px;
@@ -758,6 +1028,11 @@ td {
   animation: toast-life 3.4s ease forwards;
 }
 
+.toast.static {
+  position: static;
+  animation: none;
+}
+
 @keyframes toast-life {
   0%,
   85% {
@@ -835,6 +1110,7 @@ td {
 
   .topbar,
   .topbar-actions,
+  .license-banner,
   .document-card {
     align-items: flex-start;
     flex-direction: column;
@@ -847,7 +1123,25 @@ td {
   .kpi-grid,
   .chart-grid,
   .product-grid,
+  .admin-actions-grid,
   .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .access-row {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-row,
+  .permission-row,
+  .license-controls,
+  .license-controls.notes,
+  .billing-main,
+  .billing-main.notes {
+    grid-template-columns: 1fr;
+  }
+
+  .product-admin-row {
     grid-template-columns: 1fr;
   }
 

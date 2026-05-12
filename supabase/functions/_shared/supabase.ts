@@ -16,6 +16,38 @@ export function createRequestClient(request: Request) {
   });
 }
 
+export async function assertCompanyCanCreateUser(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  empresaId: string
+) {
+  const [{ data: license, error: licenseError }, { count, error: countError }] = await Promise.all([
+    serviceClient
+      .from("licencas_empresas")
+      .select("status, fim_teste, vencimento, limite_usuarios")
+      .eq("empresa_id", empresaId)
+      .maybeSingle(),
+    serviceClient
+      .from("usuarios_empresas")
+      .select("id", { count: "exact", head: true })
+      .eq("empresa_id", empresaId)
+      .eq("ativo", true)
+  ]);
+
+  if (licenseError) throw licenseError;
+  if (countError) throw countError;
+  if (!license) throw new Error("Empresa sem licença SaaS configurada.");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const active =
+    (license.status === "ativo" && (!license.vencimento || license.vencimento >= today)) ||
+    (license.status === "teste" && (!license.fim_teste || license.fim_teste >= today));
+
+  if (!active) throw new Error("Licença vencida, bloqueada ou sem período ativo.");
+  if ((count ?? 0) >= Number(license.limite_usuarios ?? 0)) {
+    throw new Error("Limite de usuários atingido para o plano contratado.");
+  }
+}
+
 export function createServiceClient() {
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {

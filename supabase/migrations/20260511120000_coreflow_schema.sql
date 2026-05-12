@@ -6,7 +6,7 @@ create type public.perfil_usuario as enum ('admin', 'gerente', 'operador', 'esto
 create type public.status_fiscal as enum ('NAO_EMITIDA', 'ENVIANDO', 'AUTORIZADA', 'REJEITADA', 'CANCELADA', 'CONTINGENCIA');
 create type public.status_venda as enum ('ABERTA', 'FINALIZADA', 'CANCELADA');
 create type public.forma_pagamento as enum ('DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO', 'OUTROS');
-create type public.tipo_movimentacao_estoque as enum ('ENTRADA_MANUAL', 'VENDA', 'CANCELAMENTO_VENDA', 'AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO');
+create type public.tipo_movimentacao_estoque as enum ('ENTRADA_MANUAL', 'SAIDA_MANUAL', 'VENDA', 'CANCELAMENTO_VENDA', 'AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO');
 create type public.ambiente_fiscal as enum ('homologacao', 'producao');
 
 create table public.empresas (
@@ -206,6 +206,20 @@ as $$
   );
 $$;
 
+create or replace function private.empresa_sem_usuarios(target_empresa_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select not exists (
+    select 1
+    from public.usuarios_empresas ue
+    where ue.empresa_id = target_empresa_id
+  );
+$$;
+
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
@@ -228,6 +242,193 @@ for each row execute function public.touch_updated_at();
 create trigger configuracoes_touch_updated_at before update on public.configuracoes_fiscais
 for each row execute function public.touch_updated_at();
 
+create or replace function public.finalizar_venda(
+  p_empresa_id uuid,
+  p_cliente_cpf text,
+  p_forma_pagamento public.forma_pagamento,
+  p_desconto_total numeric,
+  p_itens jsonb
+)
+returns uuid
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_venda_id uuid;
+  v_item jsonb;
+  v_produto public.produtos%rowtype;
+  v_quantidade numeric(12,3);
+  v_desconto numeric(12,2);
+  v_subtotal numeric(12,2) := 0;
+  v_total numeric(12,2);
+begin
+  if v_user_id is null then
+    raise exception 'Usuário não autenticado.';
+  end if;
+
+  if not private.usuario_tem_perfil(
+    p_empresa_id,
+    array['admin'::public.perfil_usuario, 'gerente'::public.perfil_usuario, 'operador'::public.perfil_usuario]
+  ) then
+    raise exception 'Usuário sem permissão para vender nesta empresa.';
+  end if;
+
+  if jsonb_typeof(p_itens) <> 'array' or jsonb_array_length(p_itens) = 0 then
+    raise exception 'Venda sem itens.';
+  end if;
+
+  if p_desconto_total < 0 then
+    raise exception 'Desconto total inválido.';
+  end if;
+
+  for v_item in select * from jsonb_array_elements(p_itens)
+  loop
+    v_quantidade := (v_item->>'quantidade')::numeric;
+    v_desconto := coalesce((v_item->>'desconto')::numeric, 0);
+
+    if v_quantidade <= 0 then
+      raise exception 'Quantidade inválida.';
+    end if;
+
+    select *
+    into v_produto
+    from public.produtos
+    where id = (v_item->>'produto_id')::uuid
+      and empresa_id = p_empresa_id
+      and ativo = true
+    for update;
+
+    if not found then
+      raise exception 'Produto não encontrado ou inativo.';
+    end if;
+
+    if v_produto.preco_venda <= 0 then
+      raise exception 'Produto % sem preço válido.', v_produto.descricao;
+    end if;
+
+    if v_produto.estoque_atual < v_quantidade then
+      raise exception 'Estoque insuficiente para %.', v_produto.descricao;
+    end if;
+
+    if v_desconto < 0 or v_desconto > (v_produto.preco_venda * v_quantidade) then
+      raise exception 'Desconto inválido para %.', v_produto.descricao;
+    end if;
+
+    v_subtotal := v_subtotal + ((v_produto.preco_venda * v_quantidade) - v_desconto);
+  end loop;
+
+  if p_desconto_total > v_subtotal then
+    raise exception 'Desconto maior que o total.';
+  end if;
+
+  v_total := v_subtotal - p_desconto_total;
+
+  insert into public.vendas (
+    empresa_id,
+    usuario_id,
+    cliente_cpf,
+    subtotal,
+    desconto_total,
+    total,
+    forma_pagamento,
+    status_venda,
+    status_fiscal,
+    estoque_baixado
+  )
+  values (
+    p_empresa_id,
+    v_user_id,
+    nullif(p_cliente_cpf, ''),
+    v_subtotal,
+    p_desconto_total,
+    v_total,
+    p_forma_pagamento,
+    'FINALIZADA',
+    'NAO_EMITIDA',
+    true
+  )
+  returning id into v_venda_id;
+
+  for v_item in select * from jsonb_array_elements(p_itens)
+  loop
+    v_quantidade := (v_item->>'quantidade')::numeric;
+    v_desconto := coalesce((v_item->>'desconto')::numeric, 0);
+
+    select *
+    into v_produto
+    from public.produtos
+    where id = (v_item->>'produto_id')::uuid
+      and empresa_id = p_empresa_id
+      and ativo = true
+    for update;
+
+    insert into public.venda_itens (
+      venda_id,
+      empresa_id,
+      produto_id,
+      codigo,
+      codigo_barras,
+      descricao,
+      quantidade,
+      valor_unitario,
+      desconto,
+      total,
+      ncm,
+      cfop,
+      csosn,
+      cst
+    )
+    values (
+      v_venda_id,
+      p_empresa_id,
+      v_produto.id,
+      v_produto.codigo,
+      v_produto.codigo_barras,
+      v_produto.descricao,
+      v_quantidade,
+      v_produto.preco_venda,
+      v_desconto,
+      (v_produto.preco_venda * v_quantidade) - v_desconto,
+      v_produto.ncm,
+      v_produto.cfop,
+      v_produto.csosn,
+      v_produto.cst
+    );
+
+    insert into public.movimentacoes_estoque (
+      empresa_id,
+      produto_id,
+      venda_id,
+      tipo,
+      quantidade,
+      estoque_anterior,
+      estoque_posterior,
+      observacao,
+      usuario_id
+    )
+    values (
+      p_empresa_id,
+      v_produto.id,
+      v_venda_id,
+      'VENDA',
+      v_quantidade,
+      v_produto.estoque_atual,
+      v_produto.estoque_atual - v_quantidade,
+      'Baixa automática na finalização da venda',
+      v_user_id
+    );
+
+    update public.produtos
+    set estoque_atual = estoque_atual - v_quantidade
+    where id = v_produto.id;
+  end loop;
+
+  return v_venda_id;
+end;
+$$;
+
 alter table public.empresas enable row level security;
 alter table public.usuarios_empresas enable row level security;
 alter table public.produtos enable row level security;
@@ -242,9 +443,27 @@ create policy "empresas_select_membros" on public.empresas
 for select to authenticated
 using (private.usuario_tem_empresa(id));
 
+create policy "empresas_insert_onboarding" on public.empresas
+for insert to authenticated
+with check (true);
+
+create policy "empresas_update_admin" on public.empresas
+for update to authenticated
+using (private.usuario_tem_perfil(id, array['admin'::public.perfil_usuario]))
+with check (private.usuario_tem_perfil(id, array['admin'::public.perfil_usuario]));
+
 create policy "usuarios_empresas_select_proprio_contexto" on public.usuarios_empresas
 for select to authenticated
 using (user_id = auth.uid() or private.usuario_tem_perfil(empresa_id, array['admin'::public.perfil_usuario]));
+
+create policy "usuarios_empresas_insert_primeiro_admin" on public.usuarios_empresas
+for insert to authenticated
+with check (
+  user_id = auth.uid()
+  and perfil = 'admin'::public.perfil_usuario
+  and ativo = true
+  and private.empresa_sem_usuarios(empresa_id)
+);
 
 create policy "usuarios_empresas_admin_write" on public.usuarios_empresas
 for all to authenticated
@@ -339,6 +558,8 @@ grant usage on schema public to authenticated;
 grant usage on schema private to authenticated;
 grant execute on function private.usuario_tem_empresa(uuid) to authenticated;
 grant execute on function private.usuario_tem_perfil(uuid, public.perfil_usuario[]) to authenticated;
+grant execute on function private.empresa_sem_usuarios(uuid) to authenticated;
+grant execute on function public.finalizar_venda(uuid, text, public.forma_pagamento, numeric, jsonb) to authenticated;
 grant select, insert, update on public.empresas to authenticated;
 grant select, insert, update on public.usuarios_empresas to authenticated;
 grant select, insert, update on public.produtos to authenticated;

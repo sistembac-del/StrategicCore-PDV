@@ -11,3 +11,24 @@ verify_jwt = true
 
 [functions.reenviar-nfce]
 verify_jwt = true
+
+[functions.core-admin-create-retailer]
+verify_jwt = true
+
+[functions.core-admin-create-user]
+verify_jwt = true
+
+[functions.core-admin-update-access]
+verify_jwt = true
+
+[functions.core-admin-upsert-domain]
+verify_jwt = true
+
+[functions.fiscal-settings]
+verify_jwt = true
+
+[functions.company-create-user]
+verify_jwt = true
+
+[functions.company-update-user]
+verify_jwt = true

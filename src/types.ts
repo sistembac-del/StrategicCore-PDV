@@ -5,6 +5,7 @@ export type PaymentMethod = "Dinheiro" | "Pix" | "Cartão de débito" | "Cartão
 
 export type ModuleId =
   | "dashboard"
+  | "superadmin"
   | "pdv"
   | "produtos"
   | "estoque"
