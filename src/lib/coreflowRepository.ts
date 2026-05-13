@@ -254,6 +254,21 @@ export interface FiscalApiStatus {
   healthCheckStatus?: number;
 }
 
+export interface GeneralSettings {
+  id?: string;
+  empresaId: string;
+  permitirEstoqueNegativo: boolean;
+  casasDecimaisQuantidade: number;
+  impressaoAutomaticaNfce: boolean;
+  reimpressaoDanfeAuditada: boolean;
+  baixaEstoqueAoFinalizar: boolean;
+  cancelamentoEstornaEstoque: boolean;
+  exigirCpfAcimaDe?: number;
+  pdvModoCompacto: boolean;
+  observacao?: string;
+  updatedAt?: string;
+}
+
 const fiscalStatusMap: Record<string, FiscalStatus> = {
   NAO_EMITIDA: "NAO_EMITIDA",
   ENVIANDO: "ENVIANDO",
@@ -943,6 +958,50 @@ export async function loadFiscalSettings(empresaId: string): Promise<FiscalSetti
   return mapFiscalSettings(data);
 }
 
+export async function loadGeneralSettings(empresaId: string): Promise<GeneralSettings | null> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+
+  const { data, error } = await supabase
+    .from("configuracoes_gerais")
+    .select("*")
+    .eq("empresa_id", empresaId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") return null;
+    throw error;
+  }
+
+  return data ? mapGeneralSettings(data) : null;
+}
+
+export async function saveGeneralSettings(input: GeneralSettings): Promise<GeneralSettings> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+
+  const { data, error } = await supabase
+    .from("configuracoes_gerais")
+    .upsert(
+      {
+        empresa_id: input.empresaId,
+        permitir_estoque_negativo: input.permitirEstoqueNegativo,
+        casas_decimais_quantidade: input.casasDecimaisQuantidade,
+        impressao_automatica_nfce: input.impressaoAutomaticaNfce,
+        reimpressao_danfe_auditada: input.reimpressaoDanfeAuditada,
+        baixa_estoque_ao_finalizar: input.baixaEstoqueAoFinalizar,
+        cancelamento_estorna_estoque: input.cancelamentoEstornaEstoque,
+        exigir_cpf_acima_de: input.exigirCpfAcimaDe ?? null,
+        pdv_modo_compacto: input.pdvModoCompacto,
+        observacao: input.observacao?.trim() || null
+      },
+      { onConflict: "empresa_id" }
+    )
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return mapGeneralSettings(data);
+}
+
 export async function saveFiscalSettings(input: {
   empresaId: string;
   ambiente: "homologacao" | "producao";
@@ -999,6 +1058,23 @@ function mapFiscalSettings(row: any): FiscalSettings {
     certificadoConfigurado: Boolean(row.certificado_configurado),
     cscConfigurado: Boolean(row.csc_configurado),
     ativo: Boolean(row.ativo),
+    updatedAt: row.updated_at ? new Date(row.updated_at).toLocaleString("pt-BR") : undefined
+  };
+}
+
+function mapGeneralSettings(row: any): GeneralSettings {
+  return {
+    id: row.id,
+    empresaId: row.empresa_id,
+    permitirEstoqueNegativo: Boolean(row.permitir_estoque_negativo),
+    casasDecimaisQuantidade: Number(row.casas_decimais_quantidade ?? 3),
+    impressaoAutomaticaNfce: Boolean(row.impressao_automatica_nfce),
+    reimpressaoDanfeAuditada: Boolean(row.reimpressao_danfe_auditada),
+    baixaEstoqueAoFinalizar: Boolean(row.baixa_estoque_ao_finalizar),
+    cancelamentoEstornaEstoque: Boolean(row.cancelamento_estorna_estoque),
+    exigirCpfAcimaDe: row.exigir_cpf_acima_de === null || row.exigir_cpf_acima_de === undefined ? undefined : Number(row.exigir_cpf_acima_de),
+    pdvModoCompacto: Boolean(row.pdv_modo_compacto),
+    observacao: row.observacao ?? undefined,
     updatedAt: row.updated_at ? new Date(row.updated_at).toLocaleString("pt-BR") : undefined
   };
 }

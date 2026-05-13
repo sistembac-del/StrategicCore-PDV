@@ -57,8 +57,10 @@ import {
   loadFiscalApiStatus,
   loadCompanyUsers,
   loadFiscalSettings,
+  loadGeneralSettings,
   loadSuperAdminDashboard,
   saveFiscalSettings,
+  saveGeneralSettings,
   updateAccessFromCoreAdmin,
   updateCompanyProfile,
   updateCompanyLicense,
@@ -76,6 +78,7 @@ import {
   type Customer,
   type FiscalSettings,
   type FiscalApiStatus,
+  type GeneralSettings,
   type ProductInput,
   type SaleRecord,
   type StockMovement
@@ -523,6 +526,7 @@ export function App() {
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
   const [fiscalSettings, setFiscalSettings] = useState<FiscalSettings | null>(null);
   const [fiscalApiStatus, setFiscalApiStatus] = useState<FiscalApiStatus | null>(null);
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettings | null>(null);
   const [companyUsers, setCompanyUsers] = useState<CompanyUserLink[]>([]);
   const [companyContext, setCompanyContext] = useState<CompanyContext | null>(null);
   const [superAdminProfile, setSuperAdminProfile] = useState<SuperAdminProfile | null>(null);
@@ -540,6 +544,9 @@ export function App() {
   const itemDiscounts = cart.reduce((sum, item) => sum + item.desconto, 0);
   const discountTotal = Math.min(globalDiscount + itemDiscounts, subtotal);
   const cartTotal = Math.max(subtotal - discountTotal, 0);
+  const allowNegativeStock = generalSettings?.permitirEstoqueNegativo ?? false;
+  const decreaseStockOnSale = generalSettings?.baixaEstoqueAoFinalizar ?? true;
+  const restoreStockOnCancel = generalSettings?.cancelamentoEstornaEstoque ?? true;
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -590,16 +597,18 @@ export function App() {
         setProducts(data.products);
         setDocuments(data.documents);
         setSales(data.sales);
-        const [remoteCustomers, remoteMovements, remoteFiscalSettings, remoteCompanyUsers, remoteFiscalApiStatus] = await Promise.all([
+        const [remoteCustomers, remoteMovements, remoteFiscalSettings, remoteGeneralSettings, remoteCompanyUsers, remoteFiscalApiStatus] = await Promise.all([
           loadRemoteCustomers(data.company.empresaId),
           loadRemoteStockMovements(data.company.empresaId),
           loadFiscalSettings(data.company.empresaId),
+          loadGeneralSettings(data.company.empresaId),
           loadCompanyUsers(data.company.empresaId),
           loadFiscalApiStatus(data.company.empresaId).catch(() => null)
         ]);
         setCustomers(remoteCustomers);
         setStockMovements(remoteMovements);
         setFiscalSettings(remoteFiscalSettings);
+        setGeneralSettings(remoteGeneralSettings);
         setCompanyUsers(remoteCompanyUsers);
         setFiscalApiStatus(remoteFiscalApiStatus);
       }
@@ -655,13 +664,13 @@ export function App() {
 
   function addToCart(product: Product) {
     if (!product.ativo) return setToast("Produto inativo não pode ser vendido.");
-    if (product.estoqueAtual <= 0) return setToast("Estoque indisponível para este produto.");
+    if (!allowNegativeStock && product.estoqueAtual <= 0) return setToast("Estoque indisponível para este produto.");
     if (!product.precoVenda || product.precoVenda <= 0) return setToast("Produto sem preço válido.");
 
     setCart((current) => {
       const existing = current.find((item) => item.product.id === product.id);
       if (existing) {
-        if (existing.quantidade + 1 > product.estoqueAtual) {
+        if (!allowNegativeStock && existing.quantidade + 1 > product.estoqueAtual) {
           setToast("Quantidade maior que o estoque disponível.");
           return current;
         }
@@ -678,7 +687,8 @@ export function App() {
       current
         .map((item) => {
           if (item.product.id !== productId) return item;
-          const next = Math.max(1, Math.min(quantidade, item.product.estoqueAtual));
+          const normalized = Math.max(1, quantidade);
+          const next = allowNegativeStock ? normalized : Math.min(normalized, item.product.estoqueAtual);
           return { ...item, quantidade: next };
         })
         .filter((item) => item.quantidade > 0)
@@ -702,9 +712,12 @@ export function App() {
   function validateSale() {
     if (!cart.length) return "Adicione pelo menos um produto para vender.";
     if (cart.some((item) => item.quantidade <= 0)) return "Quantidade deve ser maior que zero.";
-    if (cart.some((item) => item.quantidade > item.product.estoqueAtual)) return "Há item acima do estoque disponível.";
+    if (!allowNegativeStock && cart.some((item) => item.quantidade > item.product.estoqueAtual)) return "Há item acima do estoque disponível.";
     if (cart.some((item) => item.product.precoVenda <= 0)) return "Há produto sem preço válido.";
     if (discountTotal > subtotal) return "Desconto não pode ser maior que o total.";
+    if (generalSettings?.exigirCpfAcimaDe !== undefined && cartTotal >= generalSettings.exigirCpfAcimaDe && !consumerCpf.trim()) {
+      return `CPF do consumidor obrigatório acima de ${formatMoney(generalSettings.exigirCpfAcimaDe)}.`;
+    }
     return "";
   }
 
@@ -754,13 +767,15 @@ export function App() {
     }
 
     const vendaId = `VD-${Math.floor(1100 + Math.random() * 500)}`;
-    setProducts((current) =>
-      current.map((product) => {
-        const item = cart.find((cartItem) => cartItem.product.id === product.id);
-        if (!item) return product;
-        return { ...product, estoqueAtual: product.estoqueAtual - item.quantidade };
-      })
-    );
+    if (decreaseStockOnSale) {
+      setProducts((current) =>
+        current.map((product) => {
+          const item = cart.find((cartItem) => cartItem.product.id === product.id);
+          if (!item) return product;
+          return { ...product, estoqueAtual: product.estoqueAtual - item.quantidade };
+        })
+      );
+    }
 
     setDocuments((current) => [
       {
@@ -790,7 +805,7 @@ export function App() {
         formaPagamento: paymentMethod,
         statusVenda: "FINALIZADA",
         statusFiscal: emitFiscal ? "ENVIANDO" : "NAO_EMITIDA",
-        estoqueBaixado: true,
+        estoqueBaixado: decreaseStockOnSale,
         itens: cart.map((item) => ({
           id: crypto.randomUUID(),
           produtoId: item.product.id,
@@ -861,9 +876,9 @@ export function App() {
 
     if (remoteMode) {
       try {
-        await cancelRemoteSale({ vendaId: sale.id, motivo, estornarEstoque: true });
+        await cancelRemoteSale({ vendaId: sale.id, motivo, estornarEstoque: restoreStockOnCancel });
         await refreshRemoteData();
-        setToast("Venda cancelada e estoque estornado com historico.");
+        setToast(restoreStockOnCancel ? "Venda cancelada e estoque estornado com histórico." : "Venda cancelada sem estorno automático de estoque.");
       } catch (error) {
         setToast(error instanceof Error ? error.message : "Falha ao cancelar venda.");
       }
@@ -876,14 +891,14 @@ export function App() {
           ? {
               ...item,
               statusVenda: "CANCELADA",
-              estoqueBaixado: false,
+              estoqueBaixado: restoreStockOnCancel ? false : item.estoqueBaixado,
               canceladoEm: new Date().toLocaleString("pt-BR"),
               motivoCancelamento: motivo
             }
           : item
       )
     );
-    if (sale.estoqueBaixado) {
+    if (sale.estoqueBaixado && restoreStockOnCancel) {
       setProducts((current) =>
         current.map((product) => {
           const saleItem = sale.itens.find((item) => item.produtoId === product.id);
@@ -891,7 +906,7 @@ export function App() {
         })
       );
     }
-    setToast("Venda demo cancelada e estoque estornado.");
+    setToast(restoreStockOnCancel ? "Venda demo cancelada e estoque estornado." : "Venda demo cancelada sem estorno automático.");
   }
 
   function buildLocalProduct(input: Omit<ProductInput, "empresaId">): Product {
@@ -1116,6 +1131,18 @@ export function App() {
     }
   }
 
+  async function handleSaveGeneralSettings(input: Omit<GeneralSettings, "empresaId">) {
+    if (!companyContext) return setToast("Empresa não carregada.");
+
+    try {
+      const settings = await saveGeneralSettings({ ...input, empresaId: companyContext.empresaId });
+      setGeneralSettings(settings);
+      setToast("Configurações gerais salvas para produção.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Falha ao salvar configurações gerais.");
+    }
+  }
+
   if (!isAuthenticated) {
     return <LoginScreen onLogin={handleLogin} onCreateRetailer={handleCreateRetailer} toast={toast} />;
   }
@@ -1219,9 +1246,10 @@ export function App() {
             onFinish={finishSale}
             onToggleCart={() => setCartVisible((value) => !value)}
             canSell={canEdit(companyContext?.perfil, "sales") && canOperateByLicense}
+            compactMode={generalSettings?.pdvModoCompacto ?? false}
           />
         )}
-        {activeModule === "vendas" && <SalesHistoryModule sales={sales} onCancel={handleCancelSale} />}
+        {activeModule === "vendas" && <SalesHistoryModule sales={sales} onCancel={handleCancelSale} restoreStockOnCancel={restoreStockOnCancel} />}
         {activeModule === "produtos" && (
           <ProductsModule products={products} onCreateProduct={handleCreateProduct} onImportProducts={handleImportProducts} onToggleProduct={handleToggleProduct} canManage={canEdit(companyContext?.perfil, "products") && canOperateByLicense} />
         )}
@@ -1236,7 +1264,7 @@ export function App() {
         {activeModule === "usuarios" && (
           <UsersModule users={companyUsers} onCreateUser={handleCreateCompanyUser} onUpdateUser={handleUpdateCompanyUser} canManage={canEdit(companyContext?.perfil, "users") && canOperateByLicense} />
         )}
-        {activeModule === "gerais" && <GeneralSettingsModule />}
+        {activeModule === "gerais" && <ProductionGeneralSettingsModule settings={generalSettings} onSave={handleSaveGeneralSettings} canManage={companyContext?.perfil === "admin"} />}
       </main>
     </div>
   );
@@ -2318,9 +2346,10 @@ function PdvModule(props: {
   onFinish: (emitFiscal: boolean) => void;
   onToggleCart: () => void;
   canSell: boolean;
+  compactMode: boolean;
 }) {
   return (
-    <section className="pdv-layout">
+    <section className={props.compactMode ? "pdv-layout pdv-compact" : "pdv-layout"}>
       <div className="pdv-products">
         <div className="toolbar">
           <label className="search-box">
@@ -2489,7 +2518,15 @@ function CartPanel(props: {
   );
 }
 
-function SalesHistoryModule({ sales, onCancel }: { sales: SaleRecord[]; onCancel: (sale: SaleRecord, motivo: string) => void }) {
+function SalesHistoryModule({
+  sales,
+  onCancel,
+  restoreStockOnCancel
+}: {
+  sales: SaleRecord[];
+  onCancel: (sale: SaleRecord, motivo: string) => void;
+  restoreStockOnCancel: boolean;
+}) {
   const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
   const [cancelReason, setCancelReason] = useState("");
   const [filters, setFilters] = useState({
@@ -2668,11 +2705,11 @@ function SalesHistoryModule({ sales, onCancel }: { sales: SaleRecord[]; onCancel
             {cancellable && (
               <label className="input-stack">
                 Motivo do cancelamento
-                <textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Descreva o motivo para auditoria e estorno de estoque" />
+                <textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder={restoreStockOnCancel ? "Descreva o motivo para auditoria e estorno de estoque" : "Descreva o motivo para auditoria do cancelamento"} />
               </label>
             )}
             <button className="danger-button full" disabled={!canSubmitCancel} onClick={() => onCancel(selectedSale, cancelReason.trim())}>
-              Cancelar venda e estornar estoque
+              {restoreStockOnCancel ? "Cancelar venda e estornar estoque" : "Cancelar venda"}
             </button>
             {!cancellable && <p className="hint">Venda com NFC-e autorizada, em envio, contingencia ou ja cancelada exige fluxo fiscal antes do estorno.</p>}
             {cancellable && !canSubmitCancel && <p className="hint">Informe um motivo com pelo menos 10 caracteres.</p>}
@@ -3581,6 +3618,175 @@ function UsersModule({
         </div>
       </Panel>
     </div>
+  );
+}
+
+function ProductionGeneralSettingsModule({
+  settings,
+  onSave,
+  canManage
+}: {
+  settings: GeneralSettings | null;
+  onSave: (input: Omit<GeneralSettings, "empresaId">) => void;
+  canManage: boolean;
+}) {
+  const defaults: Omit<GeneralSettings, "empresaId"> = {
+    permitirEstoqueNegativo: false,
+    casasDecimaisQuantidade: 3,
+    impressaoAutomaticaNfce: false,
+    reimpressaoDanfeAuditada: true,
+    baixaEstoqueAoFinalizar: true,
+    cancelamentoEstornaEstoque: true,
+    exigirCpfAcimaDe: undefined,
+    pdvModoCompacto: false,
+    observacao: ""
+  };
+  const [form, setForm] = useState<Omit<GeneralSettings, "empresaId">>(defaults);
+
+  useEffect(() => {
+    if (!settings) {
+      setForm(defaults);
+      return;
+    }
+
+    const { empresaId, ...storedSettings } = settings;
+    void empresaId;
+    setForm(storedSettings);
+  }, [settings]);
+
+  return (
+    <div className="two-column">
+      <Panel title="Configurações gerais" icon={Settings}>
+        <form
+          className="entity-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave(form);
+          }}
+        >
+          <div className="settings-toggle-list">
+            <ToggleRow
+              label="Permitir estoque negativo"
+              description="Mantém bloqueado para operação segura em produção."
+              checked={form.permitirEstoqueNegativo}
+              disabled={!canManage}
+              onChange={(checked) => setForm({ ...form, permitirEstoqueNegativo: checked })}
+            />
+            <ToggleRow
+              label="Impressão automática da NFC-e"
+              description="Usado depois da autorização fiscal pela API externa."
+              checked={form.impressaoAutomaticaNfce}
+              disabled={!canManage}
+              onChange={(checked) => setForm({ ...form, impressaoAutomaticaNfce: checked })}
+            />
+            <ToggleRow
+              label="Reimpressão de DANFE auditada"
+              description="Mantém rastreabilidade para documentos fiscais."
+              checked={form.reimpressaoDanfeAuditada}
+              disabled={!canManage}
+              onChange={(checked) => setForm({ ...form, reimpressaoDanfeAuditada: checked })}
+            />
+            <ToggleRow
+              label="Baixar estoque ao finalizar venda"
+              description="Evita duplicidade no reenvio da NFC-e."
+              checked={form.baixaEstoqueAoFinalizar}
+              disabled={!canManage}
+              onChange={(checked) => setForm({ ...form, baixaEstoqueAoFinalizar: checked })}
+            />
+            <ToggleRow
+              label="Cancelamento estorna estoque"
+              description="Define o comportamento padrão do cancelamento de venda."
+              checked={form.cancelamentoEstornaEstoque}
+              disabled={!canManage}
+              onChange={(checked) => setForm({ ...form, cancelamentoEstornaEstoque: checked })}
+            />
+            <ToggleRow
+              label="PDV em modo compacto"
+              description="Otimiza a tela para balcão e dispositivos menores."
+              checked={form.pdvModoCompacto}
+              disabled={!canManage}
+              onChange={(checked) => setForm({ ...form, pdvModoCompacto: checked })}
+            />
+          </div>
+
+          <label>
+            Casas decimais da quantidade
+            <input
+              type="number"
+              min="0"
+              max="4"
+              value={form.casasDecimaisQuantidade}
+              disabled={!canManage}
+              onChange={(event) => setForm({ ...form, casasDecimaisQuantidade: Number(event.target.value) })}
+            />
+          </label>
+          <label>
+            Exigir CPF acima de
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Sem limite obrigatório"
+              value={form.exigirCpfAcimaDe ?? ""}
+              disabled={!canManage}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  exigirCpfAcimaDe: event.target.value ? Number(event.target.value) : undefined
+                })
+              }
+            />
+          </label>
+          <label className="wide-field">
+            Observação operacional
+            <textarea
+              placeholder="Regras internas, política de balcão ou instruções para operadores."
+              value={form.observacao ?? ""}
+              disabled={!canManage}
+              onChange={(event) => setForm({ ...form, observacao: event.target.value })}
+            />
+          </label>
+          <button className="primary-button full" type="submit" disabled={!canManage}>
+            Salvar configurações
+          </button>
+          {!canManage && <p className="hint">Seu cargo permite consultar, mas não alterar configurações gerais.</p>}
+        </form>
+      </Panel>
+
+      <Panel title="Estado de produção" icon={ShieldCheck}>
+        <div className="status-list">
+          <StatusLine label="Estoque negativo" status={form.permitirEstoqueNegativo ? "Permitido" : "Bloqueado"} tone={form.permitirEstoqueNegativo ? "warning" : "success"} />
+          <StatusLine label="Baixa de estoque" status={form.baixaEstoqueAoFinalizar ? "Na finalização da venda" : "Manual"} tone={form.baixaEstoqueAoFinalizar ? "success" : "warning"} />
+          <StatusLine label="Cancelamento" status={form.cancelamentoEstornaEstoque ? "Estorna estoque" : "Sem estorno automático"} tone="info" />
+          <StatusLine label="NFC-e" status="Fiscal real via Edge Function" tone="success" />
+          <StatusLine label="Última atualização" status={form.updatedAt ?? "Ainda não salva"} tone="info" />
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="toggle-row">
+      <span>
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+    </label>
   );
 }
 

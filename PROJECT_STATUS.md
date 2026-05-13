@@ -9,7 +9,7 @@ Este arquivo deve ser atualizado ao final de cada rodada de trabalho. Ele serve 
 ## Links
 
 - App principal: https://coreflow-pdv.pages.dev
-- Ultimo preview publicado: https://94730511.coreflow-pdv.pages.dev
+- Ultimo preview publicado: https://f4bf58b7.coreflow-pdv.pages.dev
 - Supabase project ref: `mubggmlkvbucneqtwvsw`
 - Cloudflare Pages project: `coreflow-pdv`
 
@@ -40,6 +40,8 @@ Observacao: senhas e tokens nao devem ser registrados neste arquivo.
 - Adaptador fiscal configuravel por secrets no Supabase.
 - Painel de status da API fiscal externa.
 - Modulo Empresa funcional com edicao por admin e consulta de plano/dominios.
+- Configuracoes Gerais agora persistidas no Supabase por empresa, com RLS, tela editavel por admin e status de producao.
+- Regras de Configuracoes Gerais aplicadas no PDV e no Postgres: estoque negativo, baixa de estoque na venda, estorno no cancelamento, CPF obrigatorio por valor e modo compacto.
 - Correcao inicial de textos do menu com acentos quebrados.
 - Arquivo de acompanhamento `PROJECT_STATUS.md` criado para continuidade entre conversas.
 
@@ -49,8 +51,8 @@ Observacao: senhas e tokens nao devem ser registrados neste arquivo.
 - Ajustar payload fiscal ao contrato exato da API escolhida.
 - Testar emissao NFC-e em homologacao com retorno real da SEFAZ/API.
 - Criar fluxo visual de teste fiscal de homologacao.
-- Melhorar Configuracoes Gerais com regras reais do PDV.
 - Criar preferencias de impressao e comportamento de impressao de DANFE.
+- Criar fluxo de baixa manual de estoque para vendas finalizadas quando a baixa automatica estiver desativada.
 - Criar filtros funcionais em Produtos, Clientes e Cupons NFC-e.
 - Melhorar relatorios com dados agrupados reais por dia/operador.
 - Criar testes automatizados de regras criticas.

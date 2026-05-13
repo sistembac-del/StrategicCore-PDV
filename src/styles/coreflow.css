@@ -892,6 +892,30 @@ img {
   align-items: start;
 }
 
+.pdv-layout.pdv-compact {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  gap: 12px;
+}
+
+.pdv-compact .product-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.pdv-compact .product-card,
+.pdv-compact .cart-panel {
+  padding: 12px;
+}
+
+.pdv-compact .product-card {
+  gap: 10px;
+}
+
+.pdv-compact .product-card h3 {
+  min-height: 36px;
+  font-size: 0.9rem;
+}
+
 .sales-history-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
@@ -1147,6 +1171,45 @@ img {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 16px;
+}
+
+.settings-toggle-list {
+  display: grid;
+  gap: 10px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 12px;
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 3px;
+}
+
+.toggle-row strong {
+  color: var(--white);
+  font-size: 0.9rem;
+}
+
+.toggle-row small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.toggle-row input {
+  width: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
+  accent-color: var(--blue);
+  box-shadow: none;
 }
 
 .filter-bar {
