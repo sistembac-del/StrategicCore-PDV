@@ -6,7 +6,24 @@ export interface CompanyContext {
   perfil: string;
   razaoSocial: string;
   nomeFantasia: string;
+  cnpj: string;
+  inscricaoEstadual?: string;
+  regimeTributario: string;
+  uf: string;
+  municipio: string;
+  endereco?: string;
+  ativo: boolean;
+  createdAt?: string;
   license?: CompanyLicenseStatus;
+  domains?: CompanyDomain[];
+}
+
+export interface CompanyDomain {
+  id: string;
+  dominio: string;
+  status: string;
+  observacao?: string;
+  createdAt: string;
 }
 
 export interface RemoteAppData {
@@ -14,6 +31,7 @@ export interface RemoteAppData {
   superAdmin: SuperAdminProfile | null;
   products: Product[];
   documents: FiscalDocument[];
+  sales: SaleRecord[];
 }
 
 export interface CompanyLicenseStatus {
@@ -121,6 +139,43 @@ export interface CompanyUserLink {
   createdAt: string;
 }
 
+export interface SaleItemRecord {
+  id: string;
+  produtoId?: string;
+  codigo: string;
+  codigoBarras?: string;
+  descricao: string;
+  quantidade: number;
+  valorUnitario: number;
+  desconto: number;
+  total: number;
+  ncm?: string;
+  cfop?: string;
+  csosn?: string;
+  cst?: string;
+}
+
+export interface SaleRecord {
+  id: string;
+  numero: string;
+  data: string;
+  createdAt: string;
+  usuarioId: string;
+  clienteCpf?: string;
+  subtotal: number;
+  descontoTotal: number;
+  total: number;
+  formaPagamento: PaymentMethod;
+  statusVenda: string;
+  statusFiscal: FiscalStatus;
+  estoqueBaixado: boolean;
+  canceladoEm?: string;
+  motivoCancelamento?: string;
+  documentoStatus?: FiscalStatus;
+  documentoChave?: string;
+  itens: SaleItemRecord[];
+}
+
 export interface ProductInput {
   empresaId: string;
   codigo: string;
@@ -181,6 +236,24 @@ export interface FiscalSettings {
   updatedAt?: string;
 }
 
+export interface FiscalApiStatus {
+  provider: string;
+  configured: boolean;
+  baseUrlConfigured: boolean;
+  apiKeyConfigured: boolean;
+  baseUrlHost?: string;
+  authHeader: string;
+  endpoints: {
+    emitir: string;
+    cancelar: string;
+    consultar: string;
+  };
+  timeoutMs: number;
+  healthCheckConfigured: boolean;
+  healthCheckOk?: boolean;
+  healthCheckStatus?: number;
+}
+
 const fiscalStatusMap: Record<string, FiscalStatus> = {
   NAO_EMITIDA: "NAO_EMITIDA",
   ENVIANDO: "ENVIANDO",
@@ -211,7 +284,7 @@ export async function loadRemoteAppData(): Promise<RemoteAppData> {
 
   const { data: memberships, error: membershipError } = await supabase
     .from("usuarios_empresas")
-    .select("empresa_id, perfil, empresas(razao_social, nome_fantasia)")
+    .select("empresa_id, perfil, empresas(razao_social, nome_fantasia, cnpj, inscricao_estadual, regime_tributario, uf, municipio, endereco, ativo, created_at)")
     .eq("ativo", true)
     .limit(1);
 
@@ -221,7 +294,7 @@ export async function loadRemoteAppData(): Promise<RemoteAppData> {
   const superAdmin = await loadSuperAdminProfile();
 
   if (!membership) {
-    return { company: null, superAdmin, products: [], documents: [] };
+    return { company: null, superAdmin, products: [], documents: [], sales: [] };
   }
 
   const companyRow = Array.isArray(membership.empresas) ? membership.empresas[0] : membership.empresas;
@@ -229,10 +302,24 @@ export async function loadRemoteAppData(): Promise<RemoteAppData> {
     empresaId: membership.empresa_id,
     perfil: membership.perfil,
     razaoSocial: companyRow?.razao_social ?? "Empresa sem razão social",
-    nomeFantasia: companyRow?.nome_fantasia ?? "Empresa"
+    nomeFantasia: companyRow?.nome_fantasia ?? "Empresa",
+    cnpj: companyRow?.cnpj ?? "",
+    inscricaoEstadual: companyRow?.inscricao_estadual ?? undefined,
+    regimeTributario: companyRow?.regime_tributario ?? "",
+    uf: companyRow?.uf ?? "",
+    municipio: companyRow?.municipio ?? "",
+    endereco: companyRow?.endereco?.texto ?? companyRow?.endereco?.logradouro ?? "",
+    ativo: Boolean(companyRow?.ativo ?? true),
+    createdAt: companyRow?.created_at ? new Date(companyRow.created_at).toLocaleString("pt-BR") : undefined
   };
 
-  const [{ data: licenseData, error: licenseError }, { data: productsData, error: productsError }, { data: documentsData, error: documentsError }] = await Promise.all([
+  const [
+    { data: licenseData, error: licenseError },
+    { data: productsData, error: productsError },
+    { data: documentsData, error: documentsError },
+    { data: salesData, error: salesError },
+    { data: domainsData, error: domainsError }
+  ] = await Promise.all([
     supabase.from("empresa_licenca_atual").select("*").eq("empresa_id", company.empresaId).maybeSingle(),
     supabase.from("produtos").select("*").eq("empresa_id", company.empresaId).order("descricao"),
     supabase
@@ -240,12 +327,25 @@ export async function loadRemoteAppData(): Promise<RemoteAppData> {
       .select("*, vendas(cliente_cpf, total, forma_pagamento, created_at)")
       .eq("empresa_id", company.empresaId)
       .order("created_at", { ascending: false })
-      .limit(50)
+      .limit(50),
+    supabase
+      .from("vendas")
+      .select("*, venda_itens(*), documentos_fiscais(status, chave_acesso)")
+      .eq("empresa_id", company.empresaId)
+      .order("created_at", { ascending: false })
+      .limit(80),
+    supabase
+      .from("empresa_dominios")
+      .select("id, dominio, status, observacao, created_at")
+      .eq("empresa_id", company.empresaId)
+      .order("created_at", { ascending: false })
   ]);
 
   if (licenseError) throw licenseError;
   if (productsError) throw productsError;
   if (documentsError) throw documentsError;
+  if (salesError) throw salesError;
+  if (domainsError && domainsError.code !== "42P01" && domainsError.code !== "PGRST205") throw domainsError;
 
   if (licenseData) {
     company.license = {
@@ -265,11 +365,20 @@ export async function loadRemoteAppData(): Promise<RemoteAppData> {
     };
   }
 
+  company.domains = (domainsData ?? []).map((row: any) => ({
+    id: row.id,
+    dominio: row.dominio,
+    status: row.status,
+    observacao: row.observacao ?? undefined,
+    createdAt: new Date(row.created_at).toLocaleString("pt-BR")
+  }));
+
   return {
     company,
     superAdmin,
     products: (productsData ?? []).map(mapProduct),
-    documents: (documentsData ?? []).map(mapFiscalDocument)
+    documents: (documentsData ?? []).map(mapFiscalDocument),
+    sales: (salesData ?? []).map(mapSaleRecord)
   };
 }
 
@@ -609,6 +718,39 @@ export async function createCompanyForCurrentUser(input: {
   if (linkError) throw linkError;
 }
 
+export async function updateCompanyProfile(input: {
+  empresaId: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpj: string;
+  inscricaoEstadual?: string;
+  regimeTributario: string;
+  uf: string;
+  municipio: string;
+  endereco?: string;
+}) {
+  if (!supabase) throw new Error("Supabase nÃ£o configurado.");
+
+  const { data, error } = await supabase
+    .from("empresas")
+    .update({
+      razao_social: input.razaoSocial.trim(),
+      nome_fantasia: input.nomeFantasia.trim() || null,
+      cnpj: input.cnpj.trim(),
+      inscricao_estadual: input.inscricaoEstadual?.trim() || null,
+      regime_tributario: input.regimeTributario.trim(),
+      uf: input.uf.trim().toUpperCase().slice(0, 2),
+      municipio: input.municipio.trim(),
+      endereco: input.endereco?.trim() ? { texto: input.endereco.trim() } : {}
+    })
+    .eq("id", input.empresaId)
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function finalizeRemoteSale(input: {
   empresaId: string;
   cart: CartItem[];
@@ -632,6 +774,23 @@ export async function finalizeRemoteSale(input: {
 
   if (error) throw error;
   return data as string;
+}
+
+export async function cancelRemoteSale(input: {
+  vendaId: string;
+  motivo: string;
+  estornarEstoque?: boolean;
+}) {
+  if (!supabase) throw new Error("Supabase nÃ£o configurado.");
+
+  const { data, error } = await supabase.rpc("cancelar_venda", {
+    p_venda_id: input.vendaId,
+    p_motivo: input.motivo,
+    p_estornar_estoque: input.estornarEstoque ?? true
+  });
+
+  if (error) throw error;
+  return data;
 }
 
 export async function createRemoteProduct(input: ProductInput) {
@@ -805,6 +964,31 @@ export async function saveFiscalSettings(input: {
   return mapFiscalSettings(data);
 }
 
+export async function loadFiscalApiStatus(empresaId: string): Promise<FiscalApiStatus | null> {
+  if (!supabase) throw new Error("Supabase nÃ£o configurado.");
+
+  const { data, error } = await supabase.functions.invoke<{ data: any }>("fiscal-provider-status", {
+    body: { empresa_id: empresaId }
+  });
+
+  if (error) throw error;
+  if (!data?.data) return null;
+
+  return {
+    provider: data.data.provider,
+    configured: Boolean(data.data.configured),
+    baseUrlConfigured: Boolean(data.data.base_url_configured),
+    apiKeyConfigured: Boolean(data.data.api_key_configured),
+    baseUrlHost: data.data.base_url_host ?? undefined,
+    authHeader: data.data.auth_header,
+    endpoints: data.data.endpoints,
+    timeoutMs: Number(data.data.timeout_ms ?? 30000),
+    healthCheckConfigured: Boolean(data.data.health_check_configured),
+    healthCheckOk: data.data.health_check_ok,
+    healthCheckStatus: data.data.health_check_status
+  };
+}
+
 function mapFiscalSettings(row: any): FiscalSettings {
   return {
     id: row.id,
@@ -861,6 +1045,7 @@ function mapFiscalDocument(row: any): FiscalDocument {
     id: row.id,
     venda: row.venda_id,
     data: new Date(row.created_at).toLocaleString("pt-BR"),
+    createdAt: row.created_at,
     cliente: row.vendas?.cliente_cpf ? "Consumidor identificado" : "Consumidor não identificado",
     cpf: row.vendas?.cliente_cpf ?? undefined,
     total: Number(row.vendas?.total ?? 0),
@@ -869,7 +1054,47 @@ function mapFiscalDocument(row: any): FiscalDocument {
     serie: row.serie ?? undefined,
     chave: row.chave_acesso ?? undefined,
     protocolo: row.protocolo ?? undefined,
+    hasXml: Boolean(row.xml_path),
+    hasDanfe: Boolean(row.danfe_path),
     formaPagamento: paymentFromDb[row.vendas?.forma_pagamento] ?? "Outros",
     motivo: row.motivo_rejeicao ?? undefined
+  };
+}
+
+function mapSaleRecord(row: any): SaleRecord {
+  const document = Array.isArray(row.documentos_fiscais) ? row.documentos_fiscais[0] : row.documentos_fiscais;
+  return {
+    id: row.id,
+    numero: String(row.id).slice(0, 8).toUpperCase(),
+    data: new Date(row.created_at).toLocaleString("pt-BR"),
+    createdAt: row.created_at,
+    usuarioId: row.usuario_id,
+    clienteCpf: row.cliente_cpf ?? undefined,
+    subtotal: Number(row.subtotal ?? 0),
+    descontoTotal: Number(row.desconto_total ?? 0),
+    total: Number(row.total ?? 0),
+    formaPagamento: paymentFromDb[row.forma_pagamento] ?? "Outros",
+    statusVenda: row.status_venda,
+    statusFiscal: fiscalStatusMap[row.status_fiscal] ?? "NAO_EMITIDA",
+    estoqueBaixado: Boolean(row.estoque_baixado),
+    canceladoEm: row.cancelado_em ? new Date(row.cancelado_em).toLocaleString("pt-BR") : undefined,
+    motivoCancelamento: row.motivo_cancelamento ?? undefined,
+    documentoStatus: document?.status ? fiscalStatusMap[document.status] : undefined,
+    documentoChave: document?.chave_acesso ?? undefined,
+    itens: (row.venda_itens ?? []).map((item: any): SaleItemRecord => ({
+      id: item.id,
+      produtoId: item.produto_id ?? undefined,
+      codigo: item.codigo,
+      codigoBarras: item.codigo_barras ?? undefined,
+      descricao: item.descricao,
+      quantidade: Number(item.quantidade ?? 0),
+      valorUnitario: Number(item.valor_unitario ?? 0),
+      desconto: Number(item.desconto ?? 0),
+      total: Number(item.total ?? 0),
+      ncm: item.ncm ?? undefined,
+      cfop: item.cfop ?? undefined,
+      csosn: item.csosn ?? undefined,
+      cst: item.cst ?? undefined
+    }))
   };
 }

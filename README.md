@@ -41,6 +41,19 @@ Conforme a documentação atual do Cloudflare Pages para Vite, use:
 ```bash
 supabase secrets set FISCAL_API_URL=https://api-fiscal.example.com
 supabase secrets set FISCAL_API_KEY=...
+supabase secrets set FISCAL_PROVIDER_NAME=generic
+```
+
+Secrets opcionais para adaptar o contrato ao provedor escolhido:
+
+```bash
+supabase secrets set FISCAL_API_AUTH_HEADER=Authorization
+supabase secrets set FISCAL_API_AUTH_SCHEME=Bearer
+supabase secrets set FISCAL_API_EMITIR_PATH=/nfce/emitir
+supabase secrets set FISCAL_API_CANCELAR_PATH=/nfce/cancelar
+supabase secrets set FISCAL_API_CONSULTAR_PATH=/nfce/consultar
+supabase secrets set FISCAL_API_TIMEOUT_MS=30000
+supabase secrets set FISCAL_API_HEALTH_PATH=/health
 ```
 
 4. Faça deploy das funções:
@@ -50,6 +63,8 @@ supabase functions deploy emitir-nfce
 supabase functions deploy cancelar-nfce
 supabase functions deploy consultar-nfce
 supabase functions deploy reenviar-nfce
+supabase functions deploy fiscal-provider-status
+supabase functions deploy fiscal-document-files
 ```
 
 As funções entregues são uma base segura e idempotente para integrar a API fiscal externa real. Elas não geram cupom fiscal falso e não expõem segredos no cliente.

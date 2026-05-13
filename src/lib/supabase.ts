@@ -16,7 +16,7 @@ export const supabase = isSupabaseConfigured
   : null;
 
 export async function invokeFiscalFunction<T>(
-  functionName: "emitir-nfce" | "cancelar-nfce" | "consultar-nfce" | "reenviar-nfce",
+  functionName: "emitir-nfce" | "cancelar-nfce" | "consultar-nfce" | "reenviar-nfce" | "fiscal-document-files" | "fiscal-provider-status",
   body: Record<string, unknown>
 ) {
   if (!supabase) {

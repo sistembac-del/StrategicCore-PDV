@@ -12,6 +12,12 @@ verify_jwt = true
 [functions.reenviar-nfce]
 verify_jwt = true
 
+[functions.fiscal-document-files]
+verify_jwt = true
+
+[functions.fiscal-provider-status]
+verify_jwt = true
+
 [functions.core-admin-create-retailer]
 verify_jwt = true
 

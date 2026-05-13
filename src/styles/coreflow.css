@@ -38,7 +38,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -47,7 +48,8 @@ button {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--line);
@@ -59,9 +61,18 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(17, 134, 255, 0.15);
+}
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.45;
+  padding: 12px;
+  outline: none;
 }
 
 label {
@@ -264,7 +275,76 @@ img {
 }
 
 .onboarding-row {
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto;
+}
+
+.onboarding-assistant {
+  display: grid;
+  gap: 14px;
+}
+
+.onboarding-score {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.onboarding-score strong {
+  color: var(--white);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.onboarding-score span {
+  color: var(--silver);
+  font-weight: 900;
+}
+
+.progress-track {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--blue), var(--blue-2));
+}
+
+.checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.checklist-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 11px;
+}
+
+.checklist-item.done {
+  border-color: rgba(32, 201, 151, 0.28);
+}
+
+.checklist-item strong,
+.checklist-item small {
+  display: block;
+}
+
+.checklist-item small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 3px;
 }
 
 .permission-row {
@@ -812,6 +892,91 @@ img {
   align-items: start;
 }
 
+.sales-history-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.sales-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.sales-summary span {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--silver);
+  padding: 10px;
+}
+
+.sales-summary strong {
+  display: block;
+  color: var(--white);
+  margin-top: 4px;
+}
+
+.sales-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.4fr) repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.sales-filter-grid .compact {
+  min-height: 42px;
+  align-self: end;
+}
+
+.sales-list,
+.sale-detail,
+.sale-items {
+  display: grid;
+  gap: 10px;
+}
+
+.sale-row,
+.sale-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px auto auto 110px;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--white);
+  padding: 11px;
+  text-align: left;
+}
+
+.sale-row.active {
+  border-color: var(--line-strong);
+  background: rgba(17, 134, 255, 0.12);
+}
+
+.sale-row span,
+.sale-item-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sale-row strong,
+.sale-row span,
+.sale-item-row strong,
+.sale-item-row span {
+  min-width: 0;
+}
+
+.sale-item-row {
+  grid-template-columns: minmax(0, 1fr) 150px 90px 100px;
+}
+
 .toolbar,
 .filter-bar {
   display: flex;
@@ -1091,6 +1256,7 @@ td {
   }
 
   .pdv-layout,
+  .sales-history-layout,
   .two-column {
     grid-template-columns: 1fr;
   }
@@ -1173,6 +1339,7 @@ td {
 
   .onboarding-row,
   .permission-row,
+  .checklist-grid,
   .license-controls,
   .license-controls.notes,
   .billing-main,
@@ -1181,6 +1348,13 @@ td {
   }
 
   .product-admin-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-summary,
+  .sales-filter-grid,
+  .sale-row,
+  .sale-item-row {
     grid-template-columns: 1fr;
   }
 

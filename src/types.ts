@@ -1,12 +1,13 @@
 import type { LucideIcon } from "lucide-react";
 
 export type FiscalStatus = "NAO_EMITIDA" | "ENVIANDO" | "AUTORIZADA" | "REJEITADA" | "CANCELADA" | "CONTINGENCIA";
-export type PaymentMethod = "Dinheiro" | "Pix" | "Cartão de débito" | "Cartão de crédito" | "Outros";
+export type PaymentMethod = "Dinheiro" | "Pix" | "Cart\u00e3o de d\u00e9bito" | "Cart\u00e3o de cr\u00e9dito" | "Outros";
 
 export type ModuleId =
   | "dashboard"
   | "superadmin"
   | "pdv"
+  | "vendas"
   | "produtos"
   | "estoque"
   | "clientes"
@@ -56,6 +57,7 @@ export interface FiscalDocument {
   id: string;
   venda: string;
   data: string;
+  createdAt?: string;
   cliente: string;
   cpf?: string;
   total: number;
@@ -64,6 +66,8 @@ export interface FiscalDocument {
   serie?: string;
   chave?: string;
   protocolo?: string;
+  hasXml?: boolean;
+  hasDanfe?: boolean;
   formaPagamento: PaymentMethod;
   motivo?: string;
 }

@@ -48,16 +48,19 @@ import {
   createRemoteCustomer,
   createRemoteStockMovement,
   createCompanyUser,
+  cancelRemoteSale,
   finalizeRemoteSale,
   registerBillingPayment,
   loadRemoteCustomers,
   loadRemoteAppData,
   loadRemoteStockMovements,
+  loadFiscalApiStatus,
   loadCompanyUsers,
   loadFiscalSettings,
   loadSuperAdminDashboard,
   saveFiscalSettings,
   updateAccessFromCoreAdmin,
+  updateCompanyProfile,
   updateCompanyLicense,
   updateCompanyUser,
   upsertDomainFromCoreAdmin,
@@ -72,7 +75,9 @@ import {
   type CompanyUserLink,
   type Customer,
   type FiscalSettings,
+  type FiscalApiStatus,
   type ProductInput,
+  type SaleRecord,
   type StockMovement
 } from "./lib/coreflowRepository";
 import { invokeFiscalFunction, isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -81,6 +86,7 @@ import type { CartItem, FiscalDocument, FiscalStatus, ModuleId, NavItem, Payment
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
   { id: "pdv", label: "PDV / Vendas", icon: ShoppingCart },
+  { id: "vendas", label: "Histórico de Vendas", icon: ReceiptText },
   { id: "produtos", label: "Produtos", icon: Package },
   { id: "estoque", label: "Estoque", icon: Boxes },
   { id: "clientes", label: "Clientes", icon: Users },
@@ -95,11 +101,11 @@ const navItems: NavItem[] = [
 const superAdminNavItem: NavItem = { id: "superadmin", label: "Core Admin", icon: ShieldCheck };
 
 const rolePermissions: Record<string, ModuleId[]> = {
-  admin: ["dashboard", "pdv", "produtos", "estoque", "clientes", "nfce", "relatorios", "fiscal", "empresa", "usuarios", "gerais"],
-  gerente: ["dashboard", "pdv", "produtos", "estoque", "clientes", "nfce", "relatorios"],
-  operador: ["pdv", "nfce"],
+  admin: ["dashboard", "pdv", "vendas", "produtos", "estoque", "clientes", "nfce", "relatorios", "fiscal", "empresa", "usuarios", "gerais"],
+  gerente: ["dashboard", "pdv", "vendas", "produtos", "estoque", "clientes", "nfce", "relatorios"],
+  operador: ["pdv", "vendas", "nfce"],
   estoquista: ["dashboard", "produtos", "estoque"],
-  visualizador: ["dashboard", "produtos", "estoque", "clientes", "nfce", "relatorios"]
+  visualizador: ["dashboard", "vendas", "produtos", "estoque", "clientes", "nfce", "relatorios"]
 };
 
 const roleLabels: Record<string, string> = {
@@ -239,6 +245,7 @@ const documentsSeed: FiscalDocument[] = [
     id: "df1",
     venda: "VD-1042",
     data: "11/05/2026 10:18",
+    createdAt: "2026-05-11T10:18:00-03:00",
     cliente: "Consumidor não identificado",
     total: 183.72,
     status: "AUTORIZADA",
@@ -252,6 +259,7 @@ const documentsSeed: FiscalDocument[] = [
     id: "df2",
     venda: "VD-1043",
     data: "11/05/2026 10:42",
+    createdAt: "2026-05-11T10:42:00-03:00",
     cliente: "Mariana Alves",
     cpf: "123.456.789-09",
     total: 71.88,
@@ -263,6 +271,7 @@ const documentsSeed: FiscalDocument[] = [
     id: "df3",
     venda: "VD-1044",
     data: "11/05/2026 11:08",
+    createdAt: "2026-05-11T11:08:00-03:00",
     cliente: "Consumidor não identificado",
     total: 32.89,
     status: "NAO_EMITIDA",
@@ -281,6 +290,86 @@ const statusTone: Record<FiscalStatus, string> = {
   CONTINGENCIA: "warning",
   NAO_EMITIDA: "muted"
 };
+
+const csvDateStamp = () => new Date().toISOString().slice(0, 10);
+
+function csvCell(value: string | number | boolean | null | undefined) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/"/g, "\"\"")}"`;
+}
+
+function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number | boolean | null | undefined>>) {
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(";")).join("\r\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filename}-${csvDateStamp()}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportSalesCsv(sales: SaleRecord[], filename = "coreflow-vendas") {
+  downloadCsv(
+    filename,
+    ["Venda", "Data", "Operador", "CPF", "Pagamento", "Status venda", "Status fiscal", "Subtotal", "Desconto", "Total", "Estoque baixado", "Itens", "Motivo cancelamento"],
+    sales.map((sale) => [
+      sale.numero,
+      sale.data,
+      sale.usuarioId,
+      sale.clienteCpf ?? "",
+      sale.formaPagamento,
+      sale.statusVenda,
+      sale.statusFiscal,
+      sale.subtotal.toFixed(2),
+      sale.descontoTotal.toFixed(2),
+      sale.total.toFixed(2),
+      sale.estoqueBaixado ? "Sim" : "Nao",
+      sale.itens.map((item) => `${item.codigo} ${item.descricao} x${item.quantidade}`).join(" | "),
+      sale.motivoCancelamento ?? ""
+    ])
+  );
+}
+
+function exportFiscalDocumentsCsv(documents: FiscalDocument[], filename = "coreflow-cupons-nfce") {
+  downloadCsv(
+    filename,
+    ["Venda", "Data", "Cliente", "CPF", "Pagamento", "Status fiscal", "Numero", "Serie", "Chave", "Protocolo", "Total", "Motivo"],
+    documents.map((document) => [
+      document.venda,
+      document.data,
+      document.cliente,
+      document.cpf ?? "",
+      document.formaPagamento,
+      document.status,
+      document.numero ?? "",
+      document.serie ?? "",
+      document.chave ?? "",
+      document.protocolo ?? "",
+      document.total.toFixed(2),
+      document.motivo ?? ""
+    ])
+  );
+}
+
+function exportLowStockCsv(products: Product[], filename = "coreflow-estoque-baixo") {
+  downloadCsv(
+    filename,
+    ["Codigo", "Descricao", "Categoria", "Marca", "Estoque atual", "Estoque minimo", "Unidade", "Preco venda"],
+    products.map((product) => [
+      product.codigo,
+      product.descricao,
+      product.categoria,
+      product.marca,
+      product.estoqueAtual,
+      product.estoqueMinimo,
+      product.unidade,
+      product.precoVenda.toFixed(2)
+    ])
+  );
+}
 
 type CsvProductImport = {
   valid: Omit<ProductInput, "empresaId">[];
@@ -429,9 +518,11 @@ export function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>(productsSeed);
   const [documents, setDocuments] = useState<FiscalDocument[]>(documentsSeed);
+  const [sales, setSales] = useState<SaleRecord[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
   const [fiscalSettings, setFiscalSettings] = useState<FiscalSettings | null>(null);
+  const [fiscalApiStatus, setFiscalApiStatus] = useState<FiscalApiStatus | null>(null);
   const [companyUsers, setCompanyUsers] = useState<CompanyUserLink[]>([]);
   const [companyContext, setCompanyContext] = useState<CompanyContext | null>(null);
   const [superAdminProfile, setSuperAdminProfile] = useState<SuperAdminProfile | null>(null);
@@ -498,14 +589,19 @@ export function App() {
       if (data.company) {
         setProducts(data.products);
         setDocuments(data.documents);
-        const [remoteCustomers, remoteMovements] = await Promise.all([
+        setSales(data.sales);
+        const [remoteCustomers, remoteMovements, remoteFiscalSettings, remoteCompanyUsers, remoteFiscalApiStatus] = await Promise.all([
           loadRemoteCustomers(data.company.empresaId),
-          loadRemoteStockMovements(data.company.empresaId)
+          loadRemoteStockMovements(data.company.empresaId),
+          loadFiscalSettings(data.company.empresaId),
+          loadCompanyUsers(data.company.empresaId),
+          loadFiscalApiStatus(data.company.empresaId).catch(() => null)
         ]);
         setCustomers(remoteCustomers);
         setStockMovements(remoteMovements);
-        setFiscalSettings(await loadFiscalSettings(data.company.empresaId));
-        setCompanyUsers(await loadCompanyUsers(data.company.empresaId));
+        setFiscalSettings(remoteFiscalSettings);
+        setCompanyUsers(remoteCompanyUsers);
+        setFiscalApiStatus(remoteFiscalApiStatus);
       }
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Falha ao carregar dados do Supabase.");
@@ -671,11 +767,45 @@ export function App() {
         id: crypto.randomUUID(),
         venda: vendaId,
         data: new Date().toLocaleString("pt-BR"),
+        createdAt: new Date().toISOString(),
         cliente: consumerCpf ? "Consumidor identificado" : "Consumidor não identificado",
         cpf: consumerCpf || undefined,
         total: cartTotal,
         status: emitFiscal ? "ENVIANDO" : "NAO_EMITIDA",
         formaPagamento: paymentMethod
+      },
+      ...current
+    ]);
+    setSales((current) => [
+      {
+        id: vendaId,
+        numero: vendaId,
+        data: new Date().toLocaleString("pt-BR"),
+        createdAt: new Date().toISOString(),
+        usuarioId: "demo",
+        clienteCpf: consumerCpf || undefined,
+        subtotal,
+        descontoTotal: discountTotal,
+        total: cartTotal,
+        formaPagamento: paymentMethod,
+        statusVenda: "FINALIZADA",
+        statusFiscal: emitFiscal ? "ENVIANDO" : "NAO_EMITIDA",
+        estoqueBaixado: true,
+        itens: cart.map((item) => ({
+          id: crypto.randomUUID(),
+          produtoId: item.product.id,
+          codigo: item.product.codigo,
+          codigoBarras: item.product.codigoBarras,
+          descricao: item.product.descricao,
+          quantidade: item.quantidade,
+          valorUnitario: item.product.precoVenda,
+          desconto: item.desconto,
+          total: item.product.precoVenda * item.quantidade - item.desconto,
+          ncm: item.product.ncm,
+          cfop: item.product.cfop,
+          csosn: item.product.csosn,
+          cst: item.product.cst
+        }))
       },
       ...current
     ]);
@@ -696,6 +826,72 @@ export function App() {
 
     const { error } = await invokeFiscalFunction(action, payload);
     setToast(error ? error.message : `Solicitação enviada para ${action}.`);
+  }
+
+  async function handleFiscalFiles(document: FiscalDocument) {
+    const { data, error } = await invokeFiscalFunction<{
+      data?: {
+        xml_url?: string | null;
+        danfe_url?: string | null;
+        expires_in?: number;
+      };
+    }>("fiscal-document-files", { documento_fiscal_id: document.id });
+
+    if (error) {
+      setToast(error.message);
+      return;
+    }
+
+    const files = data?.data;
+    const urls = [files?.danfe_url, files?.xml_url].filter(Boolean) as string[];
+    if (!urls.length) {
+      setToast("XML/DANFE ainda nao disponiveis para esta NFC-e.");
+      return;
+    }
+
+    urls.forEach((url) => window.open(url, "_blank", "noopener,noreferrer"));
+    setToast(`Link assinado gerado por ${files?.expires_in ?? 300} segundos.`);
+  }
+
+  async function handleCancelSale(sale: SaleRecord, motivo: string) {
+    if (sale.statusFiscal === "AUTORIZADA" || sale.statusFiscal === "ENVIANDO" || sale.statusFiscal === "CONTINGENCIA") {
+      setToast("Cancele/consulte a NFC-e antes de estornar esta venda.");
+      return;
+    }
+
+    if (remoteMode) {
+      try {
+        await cancelRemoteSale({ vendaId: sale.id, motivo, estornarEstoque: true });
+        await refreshRemoteData();
+        setToast("Venda cancelada e estoque estornado com historico.");
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : "Falha ao cancelar venda.");
+      }
+      return;
+    }
+
+    setSales((current) =>
+      current.map((item) =>
+        item.id === sale.id
+          ? {
+              ...item,
+              statusVenda: "CANCELADA",
+              estoqueBaixado: false,
+              canceladoEm: new Date().toLocaleString("pt-BR"),
+              motivoCancelamento: motivo
+            }
+          : item
+      )
+    );
+    if (sale.estoqueBaixado) {
+      setProducts((current) =>
+        current.map((product) => {
+          const saleItem = sale.itens.find((item) => item.produtoId === product.id);
+          return saleItem ? { ...product, estoqueAtual: product.estoqueAtual + saleItem.quantidade } : product;
+        })
+      );
+    }
+    setToast("Venda demo cancelada e estoque estornado.");
   }
 
   function buildLocalProduct(input: Omit<ProductInput, "empresaId">): Product {
@@ -870,6 +1066,30 @@ export function App() {
     }
   }
 
+  async function handleUpdateCompanyProfile(input: {
+    razaoSocial: string;
+    nomeFantasia: string;
+    cnpj: string;
+    inscricaoEstadual?: string;
+    regimeTributario: string;
+    uf: string;
+    municipio: string;
+    endereco?: string;
+  }) {
+    if (!companyContext) {
+      setToast("Empresa nao carregada.");
+      return;
+    }
+
+    try {
+      await updateCompanyProfile({ ...input, empresaId: companyContext.empresaId });
+      await refreshRemoteData();
+      setToast("Empresa atualizada com RLS multiempresa ativo.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Falha ao atualizar empresa.");
+    }
+  }
+
   async function handleCreateCompanyUser(input: { email: string; nome?: string; perfil: string; password?: string }) {
     if (!companyContext) return setToast("Empresa não carregada.");
     const licenseMessage = licenseBlockMessage(companyContext);
@@ -965,7 +1185,16 @@ export function App() {
           <LicenseBanner license={companyContext.license} message={currentLicenseMessage} />
         )}
 
-        {activeModule === "dashboard" && <Dashboard products={products} documents={documents} />}
+        {activeModule === "dashboard" && (
+          <Dashboard
+            products={products}
+            documents={documents}
+            customers={customers}
+            company={companyContext}
+            users={companyUsers}
+            fiscalSettings={fiscalSettings}
+          />
+        )}
         {activeModule === "superadmin" && superAdminProfile && <SuperAdminModule profile={superAdminProfile} />}
         {activeModule === "pdv" && (
           <PdvModule
@@ -992,6 +1221,7 @@ export function App() {
             canSell={canEdit(companyContext?.perfil, "sales") && canOperateByLicense}
           />
         )}
+        {activeModule === "vendas" && <SalesHistoryModule sales={sales} onCancel={handleCancelSale} />}
         {activeModule === "produtos" && (
           <ProductsModule products={products} onCreateProduct={handleCreateProduct} onImportProducts={handleImportProducts} onToggleProduct={handleToggleProduct} canManage={canEdit(companyContext?.perfil, "products") && canOperateByLicense} />
         )}
@@ -999,10 +1229,10 @@ export function App() {
           <StockModule products={products} movements={stockMovements} onCreateMovement={handleCreateStockMovement} canManage={canEdit(companyContext?.perfil, "stock") && canOperateByLicense} />
         )}
         {activeModule === "clientes" && <CustomersModule customers={customers} onCreateCustomer={handleCreateCustomer} canManage={canEdit(companyContext?.perfil, "customers") && canOperateByLicense} />}
-        {activeModule === "nfce" && <FiscalDocumentsModule documents={documents} onAction={triggerFiscalAction} />}
-        {activeModule === "relatorios" && <ReportsModule documents={documents} products={products} />}
-        {activeModule === "fiscal" && <FiscalSettingsModule settings={fiscalSettings} onSave={handleSaveFiscalSettings} canManage={canEdit(companyContext?.perfil, "fiscal")} />}
-        {activeModule === "empresa" && <CompanyModule />}
+        {activeModule === "nfce" && <FiscalDocumentsModule documents={documents} onAction={triggerFiscalAction} onFiles={handleFiscalFiles} />}
+        {activeModule === "relatorios" && <ReportsExportModule documents={documents} products={products} sales={sales} />}
+        {activeModule === "fiscal" && <FiscalSettingsModule settings={fiscalSettings} apiStatus={fiscalApiStatus} onSave={handleSaveFiscalSettings} canManage={canEdit(companyContext?.perfil, "fiscal")} />}
+        {activeModule === "empresa" && <CompanyProfileModule company={companyContext} onSave={handleUpdateCompanyProfile} canManage={companyContext?.perfil === "admin"} />}
         {activeModule === "usuarios" && (
           <UsersModule users={companyUsers} onCreateUser={handleCreateCompanyUser} onUpdateUser={handleUpdateCompanyUser} canManage={canEdit(companyContext?.perfil, "users") && canOperateByLicense} />
         )}
@@ -1251,15 +1481,32 @@ function Sidebar({
   );
 }
 
-function Dashboard({ products, documents }: { products: Product[]; documents: FiscalDocument[] }) {
+function Dashboard({
+  products,
+  documents,
+  customers,
+  company,
+  users,
+  fiscalSettings
+}: {
+  products: Product[];
+  documents: FiscalDocument[];
+  customers: Customer[];
+  company: CompanyContext | null;
+  users: CompanyUserLink[];
+  fiscalSettings: FiscalSettings | null;
+}) {
   const lowStock = products.filter((product) => product.estoqueAtual <= product.estoqueMinimo).length;
   const authorized = documents.filter((document) => document.status === "AUTORIZADA").length;
   const rejected = documents.filter((document) => document.status === "REJEITADA").length;
   const revenue = documents.reduce((sum, document) => sum + document.total, 0);
   const averageTicket = revenue / Math.max(documents.length, 1);
+  const onboarding = buildCompanyOnboarding({ products, customers, company, users, fiscalSettings });
 
   return (
     <section className="module-grid">
+      <OnboardingAssistant progress={onboarding} />
+
       <div className="kpi-grid">
         <Kpi title="Vendas do dia" value="38" icon={ShoppingCart} trend="+12%" />
         <Kpi title="Faturamento do dia" value={formatMoney(revenue)} icon={WalletCards} trend="+8,4%" />
@@ -1293,6 +1540,80 @@ function Dashboard({ products, documents }: { products: Product[]; documents: Fi
         </Panel>
       </div>
     </section>
+  );
+}
+
+function buildCompanyOnboarding({
+  products,
+  customers,
+  company,
+  users,
+  fiscalSettings
+}: {
+  products: Product[];
+  customers: Customer[];
+  company: CompanyContext | null;
+  users: CompanyUserLink[];
+  fiscalSettings: FiscalSettings | null;
+}) {
+  const hasProducts = products.length > 0;
+  const hasStock = products.some((product) => product.estoqueAtual > 0);
+  const fiscalReady = Boolean(fiscalSettings?.certificadoConfigurado && fiscalSettings?.cscConfigurado);
+  const licenseOk = Boolean(company?.license?.operacional);
+
+  const items = [
+    { label: "Empresa criada", done: Boolean(company), detail: company?.nomeFantasia ?? "Cadastro inicial pendente" },
+    { label: "Licença operacional", done: licenseOk, detail: company?.license ? `${company.license.planoNome} | ${company.license.status}` : "Sem licença" },
+    { label: "Usuário admin", done: users.some((user) => user.perfil === "admin" && user.ativo), detail: `${users.length} usuário(s) ativo(s)` },
+    { label: "Produtos cadastrados", done: hasProducts, detail: `${products.length} produto(s)` },
+    { label: "Estoque configurado", done: hasStock, detail: hasStock ? "Há produtos com saldo" : "Informe saldo inicial" },
+    { label: "Clientes opcionais", done: customers.length > 0, detail: `${customers.length} cliente(s)` },
+    { label: "Fiscal preparado", done: fiscalReady, detail: fiscalReady ? "Certificado e CSC configurados" : "Pode ficar para a etapa final" }
+  ];
+
+  const done = items.filter((item) => item.done).length;
+  let status = "Cadastro iniciado";
+  if (!licenseOk) status = "Bloqueado por licença";
+  else if (hasProducts && hasStock) status = fiscalReady ? "Pronto para vender e emitir" : "Pronto para vender | fiscal pendente";
+  else if (done >= 3) status = "Configuração em andamento";
+
+  return {
+    done,
+    total: items.length,
+    percent: Math.round((done / items.length) * 100),
+    status,
+    items
+  };
+}
+
+function OnboardingAssistant({
+  progress
+}: {
+  progress: ReturnType<typeof buildCompanyOnboarding>;
+}) {
+  return (
+    <Panel title="Assistente de implantação" icon={ClipboardList}>
+      <div className="onboarding-assistant">
+        <div className="onboarding-score">
+          <strong>{progress.percent}%</strong>
+          <span>{progress.status}</span>
+        </div>
+        <div className="progress-track" aria-label={`Implantação ${progress.percent}%`}>
+          <span style={{ width: `${progress.percent}%` }} />
+        </div>
+        <div className="checklist-grid">
+          {progress.items.map((item) => (
+            <article className={item.done ? "checklist-item done" : "checklist-item"} key={item.label}>
+              <span className={`badge ${item.done ? "success" : "warning"}`}>{item.done ? "OK" : "Pendente"}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <small>{item.detail}</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -1413,13 +1734,20 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
                   const companyDomains = domains.filter((domain: any) => domain.empresa_id === company.id);
                   const hasAdmin = users.some((user) => user.empresaId === company.id && user.perfil === "admin" && user.ativo);
                   const hasActiveDomain = companyDomains.some((domain: any) => domain.status === "ativo");
+                  const license = licenses.find((item) => item.empresaId === company.id);
+                  const hasProducts = company.totalProdutos > 0;
+                  const readyToSell = Boolean(license && ["ativo", "teste"].includes(license.status) && hasProducts && hasAdmin);
+                  const doneSteps = [hasAdmin, Boolean(license), hasProducts, hasActiveDomain].filter(Boolean).length;
+                  const percent = Math.round((doneSteps / 4) * 100);
                   return (
                     <article className="onboarding-row" key={company.id}>
                       <div>
                         <strong>{company.nomeFantasia}</strong>
-                        <span>{company.cnpj}</span>
+                        <span>{company.cnpj} | {percent}% | {readyToSell ? "Pronto para vender" : "Em implantação"}</span>
                       </div>
                       <span className={`badge ${hasAdmin ? "success" : "warning"}`}>Admin</span>
+                      <span className={`badge ${license ? "success" : "danger"}`}>Licença</span>
+                      <span className={`badge ${hasProducts ? "success" : "warning"}`}>Produtos</span>
                       <span className={`badge ${companyDomains.length ? "info" : "neutral"}`}>Domínio</span>
                       <span className={`badge ${hasActiveDomain ? "success" : "warning"}`}>{hasActiveDomain ? "Ativo" : "Pendente"}</span>
                     </article>
@@ -2161,6 +2489,202 @@ function CartPanel(props: {
   );
 }
 
+function SalesHistoryModule({ sales, onCancel }: { sales: SaleRecord[]; onCancel: (sale: SaleRecord, motivo: string) => void }) {
+  const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
+  const [cancelReason, setCancelReason] = useState("");
+  const [filters, setFilters] = useState({
+    query: "",
+    startDate: "",
+    endDate: "",
+    operatorId: "",
+    payment: "",
+    saleStatus: "",
+    fiscalStatus: ""
+  });
+  const operatorOptions = useMemo(() => Array.from(new Set(sales.map((sale) => sale.usuarioId).filter(Boolean))), [sales]);
+  const paymentOptions = useMemo(() => Array.from(new Set(sales.map((sale) => sale.formaPagamento))), [sales]);
+  const saleStatusOptions = useMemo(() => Array.from(new Set(sales.map((sale) => sale.statusVenda))), [sales]);
+  const fiscalStatusOptions = useMemo(() => Array.from(new Set(sales.map((sale) => sale.statusFiscal))), [sales]);
+  const filteredSales = useMemo(() => {
+    const term = filters.query.trim().toLowerCase();
+    return sales.filter((sale) => {
+      const saleDay = sale.createdAt.slice(0, 10);
+      const matchesSearch =
+        !term ||
+        sale.numero.toLowerCase().includes(term) ||
+        sale.clienteCpf?.toLowerCase().includes(term) ||
+        sale.itens.some((item) =>
+          [item.descricao, item.codigo, item.codigoBarras ?? ""].some((value) => value.toLowerCase().includes(term))
+        );
+
+      return (
+        matchesSearch &&
+        (!filters.startDate || saleDay >= filters.startDate) &&
+        (!filters.endDate || saleDay <= filters.endDate) &&
+        (!filters.operatorId || sale.usuarioId === filters.operatorId) &&
+        (!filters.payment || sale.formaPagamento === filters.payment) &&
+        (!filters.saleStatus || sale.statusVenda === filters.saleStatus) &&
+        (!filters.fiscalStatus || sale.statusFiscal === filters.fiscalStatus)
+      );
+    });
+  }, [filters, sales]);
+  const selectedSale = filteredSales.find((sale) => sale.id === selectedSaleId) ?? filteredSales[0];
+  const totalSold = filteredSales.reduce((sum, sale) => sum + sale.total, 0);
+  const fiscalBlocksCancel =
+    selectedSale?.statusFiscal === "AUTORIZADA" ||
+    selectedSale?.statusFiscal === "ENVIANDO" ||
+    selectedSale?.statusFiscal === "CONTINGENCIA";
+  const cancellable = selectedSale && selectedSale.statusVenda !== "CANCELADA" && !fiscalBlocksCancel;
+  const canSubmitCancel = Boolean(cancellable && cancelReason.trim().length >= 10);
+
+  useEffect(() => {
+    if (filteredSales.length && !filteredSales.some((sale) => sale.id === selectedSaleId)) {
+      setSelectedSaleId(filteredSales[0].id);
+    }
+    if (!filteredSales.length && selectedSaleId) setSelectedSaleId("");
+  }, [filteredSales, selectedSaleId]);
+
+  useEffect(() => {
+    setCancelReason("");
+  }, [selectedSaleId]);
+
+  return (
+    <div className="sales-history-layout">
+      <Panel title="Histórico de vendas" icon={ReceiptText}>
+        <div className="sales-summary">
+          <span>Vendas <strong>{filteredSales.length}</strong></span>
+          <span>Total <strong>{formatMoney(totalSold)}</strong></span>
+          <span>Ticket medio <strong>{formatMoney(totalSold / Math.max(filteredSales.length, 1))}</strong></span>
+        </div>
+        <div className="sales-filter-grid">
+          <label>
+            Busca
+            <input value={filters.query} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} placeholder="Venda, CPF, produto ou codigo" />
+          </label>
+          <label>
+            Data inicial
+            <input type="date" value={filters.startDate} onChange={(event) => setFilters((current) => ({ ...current, startDate: event.target.value }))} />
+          </label>
+          <label>
+            Data final
+            <input type="date" value={filters.endDate} onChange={(event) => setFilters((current) => ({ ...current, endDate: event.target.value }))} />
+          </label>
+          <label>
+            Operador
+            <select value={filters.operatorId} onChange={(event) => setFilters((current) => ({ ...current, operatorId: event.target.value }))}>
+              <option value="">Todos</option>
+              {operatorOptions.map((operatorId) => (
+                <option value={operatorId} key={operatorId}>Operador {operatorId.slice(0, 8)}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Pagamento
+            <select value={filters.payment} onChange={(event) => setFilters((current) => ({ ...current, payment: event.target.value }))}>
+              <option value="">Todos</option>
+              {paymentOptions.map((payment) => (
+                <option value={payment} key={payment}>{payment}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Status venda
+            <select value={filters.saleStatus} onChange={(event) => setFilters((current) => ({ ...current, saleStatus: event.target.value }))}>
+              <option value="">Todos</option>
+              {saleStatusOptions.map((status) => (
+                <option value={status} key={status}>{status}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Status fiscal
+            <select value={filters.fiscalStatus} onChange={(event) => setFilters((current) => ({ ...current, fiscalStatus: event.target.value }))}>
+              <option value="">Todos</option>
+              {fiscalStatusOptions.map((status) => (
+                <option value={status} key={status}>{status}</option>
+              ))}
+            </select>
+          </label>
+          <button className="primary-button compact" onClick={() => exportSalesCsv(filteredSales, "coreflow-historico-vendas")}>
+            <FileDown size={15} />
+            Exportar CSV
+          </button>
+          <button className="secondary-button compact" onClick={() => setFilters({ query: "", startDate: "", endDate: "", operatorId: "", payment: "", saleStatus: "", fiscalStatus: "" })}>
+            Limpar
+          </button>
+        </div>
+        <div className="sales-list">
+          {filteredSales.map((sale) => (
+            <button
+              className={selectedSale?.id === sale.id ? "sale-row active" : "sale-row"}
+              key={sale.id}
+              onClick={() => setSelectedSaleId(sale.id)}
+            >
+              <div>
+                <strong>Venda {sale.numero}</strong>
+                <span>{sale.data} | {sale.clienteCpf ? `CPF ${sale.clienteCpf}` : "Consumidor não identificado"}</span>
+              </div>
+              <span>{sale.formaPagamento}</span>
+              <span className={`badge ${sale.statusVenda === "CANCELADA" ? "danger" : "success"}`}>{sale.statusVenda}</span>
+              <span className={`badge ${statusTone[sale.statusFiscal]}`}>{sale.statusFiscal}</span>
+              <strong>{formatMoney(sale.total)}</strong>
+            </button>
+          ))}
+          {!filteredSales.length && <p className="empty-state">Nenhuma venda encontrada para os filtros aplicados.</p>}
+        </div>
+      </Panel>
+
+      <Panel title="Detalhes da venda" icon={FileText}>
+        {selectedSale ? (
+          <div className="sale-detail">
+            <div className="status-list">
+              <StatusLine label="Número" status={selectedSale.numero} tone="info" />
+              <StatusLine label="Data" status={selectedSale.data} tone="muted" />
+              <StatusLine label="Pagamento" status={selectedSale.formaPagamento} tone="info" />
+              <StatusLine label="Status venda" status={selectedSale.statusVenda} tone={selectedSale.statusVenda === "CANCELADA" ? "danger" : "success"} />
+              <StatusLine label="Status fiscal" status={selectedSale.statusFiscal} tone={statusTone[selectedSale.statusFiscal]} />
+              <StatusLine label="Estoque" status={selectedSale.estoqueBaixado ? "Baixado" : "Pendente"} tone={selectedSale.estoqueBaixado ? "success" : "warning"} />
+              {selectedSale.canceladoEm && <StatusLine label="Cancelada em" status={selectedSale.canceladoEm} tone="danger" />}
+            </div>
+            <div className="sale-items">
+              {selectedSale.itens.map((item) => (
+                <article className="sale-item-row" key={item.id}>
+                  <div>
+                    <strong>{item.descricao}</strong>
+                    <span>{item.codigo} | NCM {item.ncm ?? "-"} | CFOP {item.cfop ?? "-"}</span>
+                  </div>
+                  <span>{item.quantidade} x {formatMoney(item.valorUnitario)}</span>
+                  <span>Desc. {formatMoney(item.desconto)}</span>
+                  <strong>{formatMoney(item.total)}</strong>
+                </article>
+              ))}
+            </div>
+            <div className="totals">
+              <span>Subtotal <strong>{formatMoney(selectedSale.subtotal)}</strong></span>
+              <span>Desconto <strong>{formatMoney(selectedSale.descontoTotal)}</strong></span>
+              <span className="grand-total">Total <strong>{formatMoney(selectedSale.total)}</strong></span>
+            </div>
+            {selectedSale.motivoCancelamento && <p className="hint">Motivo: {selectedSale.motivoCancelamento}</p>}
+            {cancellable && (
+              <label className="input-stack">
+                Motivo do cancelamento
+                <textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Descreva o motivo para auditoria e estorno de estoque" />
+              </label>
+            )}
+            <button className="danger-button full" disabled={!canSubmitCancel} onClick={() => onCancel(selectedSale, cancelReason.trim())}>
+              Cancelar venda e estornar estoque
+            </button>
+            {!cancellable && <p className="hint">Venda com NFC-e autorizada, em envio, contingencia ou ja cancelada exige fluxo fiscal antes do estorno.</p>}
+            {cancellable && !canSubmitCancel && <p className="hint">Informe um motivo com pelo menos 10 caracteres.</p>}
+          </div>
+        ) : (
+          <p className="empty-state">Selecione uma venda para ver detalhes.</p>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
 function ProductsModule({
   products,
   onCreateProduct,
@@ -2512,10 +3036,12 @@ function CustomersModule({
 
 function FiscalDocumentsModule({
   documents,
-  onAction
+  onAction,
+  onFiles
 }: {
   documents: FiscalDocument[];
   onAction: (action: "reenviar-nfce" | "consultar-nfce" | "cancelar-nfce", document: FiscalDocument) => void;
+  onFiles: (document: FiscalDocument) => void;
 }) {
   return (
     <Panel title="Histórico fiscal NFC-e modelo 65" icon={ReceiptText}>
@@ -2536,10 +3062,13 @@ function FiscalDocumentsModule({
                 <RefreshCcw size={15} />
                 Consultar
               </button>
-              <button className="secondary-button compact">
+              <button className="secondary-button compact" disabled={!document.hasXml && !document.hasDanfe} onClick={() => onFiles(document)}>
                 <FileDown size={15} />
                 XML/DANFE
               </button>
+              {(document.hasXml || document.hasDanfe) && (
+                <span className="badge info">{document.hasDanfe ? "DANFE" : "XML"}</span>
+              )}
               {(document.status === "REJEITADA" || document.status === "NAO_EMITIDA") && (
                 <button className="primary-button compact" onClick={() => onAction("reenviar-nfce", document)}>
                   Reenviar
@@ -2581,12 +3110,155 @@ function ReportsModule({ documents, products }: { documents: FiscalDocument[]; p
   );
 }
 
+function ReportsExportModule({ documents, products, sales }: { documents: FiscalDocument[]; products: Product[]; sales: SaleRecord[] }) {
+  const [filters, setFilters] = useState({
+    startDate: "",
+    endDate: "",
+    operatorId: "",
+    payment: "",
+    fiscalStatus: ""
+  });
+  const operatorOptions = useMemo(() => Array.from(new Set(sales.map((sale) => sale.usuarioId).filter(Boolean))), [sales]);
+  const paymentOptions = useMemo(() => Array.from(new Set(sales.map((sale) => sale.formaPagamento))), [sales]);
+  const fiscalStatusOptions = useMemo(() => Array.from(new Set([...sales.map((sale) => sale.statusFiscal), ...documents.map((document) => document.status)])), [documents, sales]);
+  const filteredSales = useMemo(
+    () =>
+      sales.filter((sale) => {
+        const saleDay = sale.createdAt.slice(0, 10);
+        return (
+          (!filters.startDate || saleDay >= filters.startDate) &&
+          (!filters.endDate || saleDay <= filters.endDate) &&
+          (!filters.operatorId || sale.usuarioId === filters.operatorId) &&
+          (!filters.payment || sale.formaPagamento === filters.payment) &&
+          (!filters.fiscalStatus || sale.statusFiscal === filters.fiscalStatus)
+        );
+      }),
+    [filters, sales]
+  );
+  const filteredDocuments = useMemo(
+    () =>
+      documents.filter((document) => {
+        const documentDay = document.createdAt?.slice(0, 10) ?? "";
+        return (
+          (!filters.startDate || !documentDay || documentDay >= filters.startDate) &&
+          (!filters.endDate || !documentDay || documentDay <= filters.endDate) &&
+          (!filters.payment || document.formaPagamento === filters.payment) &&
+          (!filters.fiscalStatus || document.status === filters.fiscalStatus)
+        );
+      }),
+    [documents, filters]
+  );
+  const lowStock = products.filter((product) => product.estoqueAtual <= product.estoqueMinimo);
+  const revenue = filteredSales.reduce((sum, sale) => sum + sale.total, 0);
+  const paymentRows = paymentOptions.map((payment) => {
+    const total = filteredSales.filter((sale) => sale.formaPagamento === payment).reduce((sum, sale) => sum + sale.total, 0);
+    return [payment, formatMoney(total)];
+  });
+  const productRanking = Array.from(
+    filteredSales
+      .flatMap((sale) => sale.itens)
+      .reduce((map, item) => {
+        const current = map.get(item.descricao) ?? { quantity: 0, total: 0 };
+        map.set(item.descricao, { quantity: current.quantity + item.quantidade, total: current.total + item.total });
+        return map;
+      }, new Map<string, { quantity: number; total: number }>())
+      .entries()
+  )
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 6)
+    .map(([name, value]) => [name, `${value.quantity} un | ${formatMoney(value.total)}`]);
+
+  return (
+    <div className="module-grid">
+      <Panel title="Filtros e exportacao" icon={FileDown}>
+        <div className="sales-filter-grid">
+          <label>
+            Data inicial
+            <input type="date" value={filters.startDate} onChange={(event) => setFilters((current) => ({ ...current, startDate: event.target.value }))} />
+          </label>
+          <label>
+            Data final
+            <input type="date" value={filters.endDate} onChange={(event) => setFilters((current) => ({ ...current, endDate: event.target.value }))} />
+          </label>
+          <label>
+            Operador
+            <select value={filters.operatorId} onChange={(event) => setFilters((current) => ({ ...current, operatorId: event.target.value }))}>
+              <option value="">Todos</option>
+              {operatorOptions.map((operatorId) => (
+                <option value={operatorId} key={operatorId}>Operador {operatorId.slice(0, 8)}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Pagamento
+            <select value={filters.payment} onChange={(event) => setFilters((current) => ({ ...current, payment: event.target.value }))}>
+              <option value="">Todos</option>
+              {paymentOptions.map((payment) => (
+                <option value={payment} key={payment}>{payment}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Status fiscal
+            <select value={filters.fiscalStatus} onChange={(event) => setFilters((current) => ({ ...current, fiscalStatus: event.target.value }))}>
+              <option value="">Todos</option>
+              {fiscalStatusOptions.map((status) => (
+                <option value={status} key={status}>{status}</option>
+              ))}
+            </select>
+          </label>
+          <button className="primary-button compact" onClick={() => exportSalesCsv(filteredSales, "coreflow-relatorio-vendas")}>
+            <FileDown size={15} />
+            Vendas
+          </button>
+          <button className="secondary-button compact" onClick={() => exportFiscalDocumentsCsv(filteredDocuments, "coreflow-relatorio-nfce")}>
+            <FileDown size={15} />
+            NFC-e
+          </button>
+          <button className="secondary-button compact" onClick={() => exportLowStockCsv(lowStock)}>
+            <FileDown size={15} />
+            Estoque
+          </button>
+          <button className="secondary-button compact" onClick={() => setFilters({ startDate: "", endDate: "", operatorId: "", payment: "", fiscalStatus: "" })}>
+            Limpar
+          </button>
+        </div>
+      </Panel>
+      <div className="kpi-grid">
+        <Kpi title="Vendas filtradas" value={String(filteredSales.length)} icon={ShoppingCart} />
+        <Kpi title="Faturamento filtrado" value={formatMoney(revenue)} icon={WalletCards} />
+        <Kpi title="Ticket medio" value={formatMoney(revenue / Math.max(filteredSales.length, 1))} icon={CreditCard} />
+        <Kpi title="Cupons filtrados" value={String(filteredDocuments.length)} icon={ReceiptText} />
+      </div>
+      <div className="chart-grid">
+        <Panel title="Faturamento diario" icon={BarChart3}>
+          <BarSeries values={[180, 220, 194, 288, 342, 316, 410]} />
+        </Panel>
+        <Panel title="Cupons autorizados e rejeitados" icon={FileText}>
+          <StatusStack documents={filteredDocuments} />
+        </Panel>
+        <Panel title="Produtos com estoque baixo" icon={AlertTriangle}>
+          <RankList rows={lowStock.map((product) => [product.descricao, `${product.estoqueAtual} un`])} />
+        </Panel>
+        <Panel title="Produtos mais vendidos" icon={Package}>
+          <RankList rows={productRanking.length ? productRanking : [["Sem vendas no filtro", "-"]]} />
+        </Panel>
+        <Panel title="Vendas por pagamento" icon={CreditCard}>
+          <RankList rows={paymentRows.length ? paymentRows : [["Sem vendas no filtro", "-"]]} />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
 function FiscalSettingsModule({
   settings,
+  apiStatus,
   onSave,
   canManage
 }: {
   settings: FiscalSettings | null;
+  apiStatus: FiscalApiStatus | null;
   onSave: (input: {
     ambiente: "homologacao" | "producao";
     serieNfce: string;
@@ -2678,7 +3350,136 @@ function FiscalSettingsModule({
           <StatusLine label="CSC/token" status={settings?.cscConfigurado ? "Configurado e mascarado" : "Ausente"} tone={settings?.cscConfigurado ? "success" : "warning"} />
           <StatusLine label="Ambiente" status={settings?.ambiente === "producao" ? "Produção" : "Homologação"} tone={settings?.ambiente === "producao" ? "danger" : "warning"} />
           <StatusLine label="Edge Functions" status="Obrigatórias para NFC-e" tone="success" />
+          <StatusLine label="API fiscal externa" status={apiStatus?.configured ? "Configurada" : "Secrets pendentes"} tone={apiStatus?.configured ? "success" : "danger"} />
+          <StatusLine label="Provider fiscal" status={apiStatus?.provider ?? "-"} tone={apiStatus?.configured ? "info" : "muted"} />
+          <StatusLine label="Host da API" status={apiStatus?.baseUrlHost ?? "-"} tone={apiStatus?.baseUrlConfigured ? "info" : "warning"} />
+          <StatusLine label="Chave da API" status={apiStatus?.apiKeyConfigured ? "Configurada e oculta" : "Ausente"} tone={apiStatus?.apiKeyConfigured ? "success" : "danger"} />
+          <StatusLine label="Health check" status={apiStatus?.healthCheckConfigured ? (apiStatus.healthCheckOk ? `OK ${apiStatus.healthCheckStatus ?? ""}` : "Falhou/sem resposta") : "Nao configurado"} tone={apiStatus?.healthCheckConfigured ? (apiStatus.healthCheckOk ? "success" : "warning") : "muted"} />
           <StatusLine label="Última atualização" status={settings?.updatedAt ?? "-"} tone="muted" />
+        </div>
+        <p className="hint">Secrets esperadas: FISCAL_API_URL, FISCAL_API_KEY, FISCAL_PROVIDER_NAME e endpoints opcionais por operacao.</p>
+      </Panel>
+    </div>
+  );
+}
+
+function CompanyProfileModule({
+  company,
+  onSave,
+  canManage
+}: {
+  company: CompanyContext | null;
+  onSave: (input: {
+    razaoSocial: string;
+    nomeFantasia: string;
+    cnpj: string;
+    inscricaoEstadual?: string;
+    regimeTributario: string;
+    uf: string;
+    municipio: string;
+    endereco?: string;
+  }) => void;
+  canManage: boolean;
+}) {
+  const [form, setForm] = useState({
+    razaoSocial: company?.razaoSocial ?? "",
+    nomeFantasia: company?.nomeFantasia ?? "",
+    cnpj: company?.cnpj ?? "",
+    inscricaoEstadual: company?.inscricaoEstadual ?? "",
+    regimeTributario: company?.regimeTributario ?? "simples_nacional",
+    uf: company?.uf ?? "",
+    municipio: company?.municipio ?? "",
+    endereco: company?.endereco ?? ""
+  });
+
+  useEffect(() => {
+    setForm({
+      razaoSocial: company?.razaoSocial ?? "",
+      nomeFantasia: company?.nomeFantasia ?? "",
+      cnpj: company?.cnpj ?? "",
+      inscricaoEstadual: company?.inscricaoEstadual ?? "",
+      regimeTributario: company?.regimeTributario ?? "simples_nacional",
+      uf: company?.uf ?? "",
+      municipio: company?.municipio ?? "",
+      endereco: company?.endereco ?? ""
+    });
+  }, [company]);
+
+  return (
+    <div className="two-column">
+      <Panel title="Empresa e multiempresa" icon={Building2}>
+        <form
+          className="settings-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canManage) return;
+            onSave(form);
+          }}
+        >
+          <label>
+            Razao social
+            <input required disabled={!canManage} value={form.razaoSocial} onChange={(event) => setForm({ ...form, razaoSocial: event.target.value })} />
+          </label>
+          <label>
+            Nome fantasia
+            <input disabled={!canManage} value={form.nomeFantasia} onChange={(event) => setForm({ ...form, nomeFantasia: event.target.value })} />
+          </label>
+          <label>
+            CNPJ
+            <input required disabled={!canManage} value={form.cnpj} onChange={(event) => setForm({ ...form, cnpj: event.target.value })} />
+          </label>
+          <label>
+            Inscricao Estadual
+            <input disabled={!canManage} value={form.inscricaoEstadual} onChange={(event) => setForm({ ...form, inscricaoEstadual: event.target.value })} />
+          </label>
+          <label>
+            Regime tributario
+            <select disabled={!canManage} value={form.regimeTributario} onChange={(event) => setForm({ ...form, regimeTributario: event.target.value })}>
+              <option value="simples_nacional">Simples Nacional</option>
+              <option value="lucro_presumido">Lucro Presumido</option>
+              <option value="lucro_real">Lucro Real</option>
+              <option value="mei">MEI</option>
+            </select>
+          </label>
+          <label>
+            UF
+            <input required disabled={!canManage} maxLength={2} value={form.uf} onChange={(event) => setForm({ ...form, uf: event.target.value.toUpperCase() })} />
+          </label>
+          <label>
+            Municipio
+            <input required disabled={!canManage} value={form.municipio} onChange={(event) => setForm({ ...form, municipio: event.target.value })} />
+          </label>
+          <label>
+            Endereco completo
+            <textarea disabled={!canManage} value={form.endereco} onChange={(event) => setForm({ ...form, endereco: event.target.value })} />
+          </label>
+          <button className="primary-button full" type="submit" disabled={!canManage}>Salvar empresa</button>
+        </form>
+        {!canManage && <p className="hint">Seu cargo permite consultar dados da empresa, mas somente admin pode editar.</p>}
+        <p className="hint">Todas as tabelas operacionais usam empresa_id e RLS para isolamento por empresa.</p>
+      </Panel>
+
+      <Panel title="Status SaaS e dominios" icon={ShieldCheck}>
+        <div className="status-list">
+          <StatusLine label="Empresa" status={company?.ativo ? "Ativa" : "Inativa"} tone={company?.ativo ? "success" : "danger"} />
+          <StatusLine label="Criada em" status={company?.createdAt ?? "-"} tone="muted" />
+          <StatusLine label="Perfil atual" status={roleLabels[company?.perfil ?? "visualizador"] ?? "-"} tone="info" />
+          <StatusLine label="Plano" status={company?.license?.planoNome ?? "Sem licenca"} tone={company?.license?.operacional ? "success" : "warning"} />
+          <StatusLine label="Status da licenca" status={company?.license?.status ?? "-"} tone={company?.license?.operacional ? "success" : "danger"} />
+          <StatusLine label="Usuarios" status={`${company?.license?.usuariosAtivos ?? 0}/${company?.license?.limiteUsuarios ?? 0}`} tone="info" />
+          <StatusLine label="Produtos" status={`${company?.license?.produtosAtivos ?? 0}/${company?.license?.limiteProdutos ?? 0}`} tone="info" />
+        </div>
+        <div className="access-list">
+          {(company?.domains ?? []).map((domain) => (
+            <div className="access-row" key={domain.id}>
+              <div>
+                <strong>{domain.dominio}</strong>
+                <span>{domain.observacao ?? `Criado em ${domain.createdAt}`}</span>
+              </div>
+              <span className={`badge ${domain.status === "ativo" ? "success" : "warning"}`}>{domain.status}</span>
+            </div>
+          ))}
+          {!company?.domains?.length && <p className="empty-state">Nenhum dominio vinculado ainda. O Core Admin pode criar dominios para esta empresa.</p>}
         </div>
       </Panel>
     </div>
