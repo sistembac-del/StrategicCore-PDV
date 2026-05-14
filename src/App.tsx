@@ -1,4 +1,4 @@
-import {
+﻿import {
   AlertTriangle,
   BadgeCheck,
   BarChart3,
@@ -21,6 +21,7 @@ import {
   LogOut,
   Menu,
   Package,
+  Printer,
   ReceiptText,
   RefreshCcw,
   Search,
@@ -61,10 +62,12 @@ import {
   loadSuperAdminDashboard,
   saveFiscalSettings,
   saveGeneralSettings,
+  settleRemoteSaleStock,
   updateAccessFromCoreAdmin,
   updateCompanyProfile,
   updateCompanyLicense,
   updateCompanyUser,
+  updateRemoteProductPricing,
   upsertDomainFromCoreAdmin,
   setRemoteProductActive,
   type SuperAdminCompanySummary,
@@ -89,16 +92,16 @@ import type { CartItem, FiscalDocument, FiscalStatus, ModuleId, NavItem, Payment
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
   { id: "pdv", label: "PDV / Vendas", icon: ShoppingCart },
-  { id: "vendas", label: "Histórico de Vendas", icon: ReceiptText },
-  { id: "produtos", label: "Produtos", icon: Package },
+  { id: "vendas", label: "HistÃ³rico de Vendas", icon: ReceiptText },
+  { id: "produtos", label: "Entrada de Notas", icon: Package },
   { id: "estoque", label: "Estoque", icon: Boxes },
   { id: "clientes", label: "Clientes", icon: Users },
   { id: "nfce", label: "Cupons NFC-e", icon: ReceiptText },
-  { id: "relatorios", label: "Relatórios", icon: BarChart3 },
-  { id: "fiscal", label: "Configurações Fiscais", icon: ShieldCheck },
+  { id: "relatorios", label: "RelatÃ³rios", icon: BarChart3 },
+  { id: "fiscal", label: "ConfiguraÃ§Ãµes Fiscais", icon: ShieldCheck },
   { id: "empresa", label: "Empresa", icon: Building2 },
-  { id: "usuarios", label: "Usuários e Acessos", icon: UserCog },
-  { id: "gerais", label: "Configurações Gerais", icon: Settings }
+  { id: "usuarios", label: "UsuÃ¡rios e Acessos", icon: UserCog },
+  { id: "gerais", label: "ConfiguraÃ§Ãµes Gerais", icon: Settings }
 ];
 
 const superAdminNavItem: NavItem = { id: "superadmin", label: "Core Admin", icon: ShieldCheck };
@@ -137,12 +140,12 @@ function canEdit(profile: string | undefined, area: "sales" | "products" | "stoc
 
 function licenseBlockMessage(company?: CompanyContext | null) {
   const license = company?.license;
-  if (!license) return "Empresa sem licença SaaS configurada.";
+  if (!license) return "Empresa sem licenÃ§a SaaS configurada.";
   if (!license.operacional) {
-    if (license.status === "bloqueado") return license.bloqueioMotivo || "Licença bloqueada pelo Core Admin.";
-    if (license.status === "vencido") return "Licença vencida. Regularize o plano para liberar a operação.";
-    if (license.status === "cancelado") return "Licença cancelada.";
-    return "Licença fora do período ativo.";
+    if (license.status === "bloqueado") return license.bloqueioMotivo || "LicenÃ§a bloqueada pelo Core Admin.";
+    if (license.status === "vencido") return "LicenÃ§a vencida. Regularize o plano para liberar a operaÃ§Ã£o.";
+    if (license.status === "cancelado") return "LicenÃ§a cancelada.";
+    return "LicenÃ§a fora do perÃ­odo ativo.";
   }
   return "";
 }
@@ -166,7 +169,7 @@ const productsSeed: Product[] = [
     id: "p1",
     codigo: "PRD-001",
     codigoBarras: "7891000100019",
-    descricao: "Café Premium Torrado 500g",
+    descricao: "CafÃ© Premium Torrado 500g",
     categoria: "Mercearia",
     marca: "CoreMarket",
     precoCusto: 16.4,
@@ -187,7 +190,7 @@ const productsSeed: Product[] = [
     id: "p2",
     codigo: "PRD-002",
     codigoBarras: "7892000200022",
-    descricao: "Açúcar Cristal 1kg",
+    descricao: "AÃ§Ãºcar Cristal 1kg",
     categoria: "Mercearia",
     marca: "DoceLar",
     precoCusto: 3.7,
@@ -226,7 +229,7 @@ const productsSeed: Product[] = [
     codigo: "PRD-004",
     codigoBarras: "7894000400048",
     descricao: "Fone Bluetooth Compact",
-    categoria: "Eletrônicos",
+    categoria: "EletrÃ´nicos",
     marca: "Pulse",
     precoCusto: 48,
     precoVenda: 89.9,
@@ -249,7 +252,7 @@ const documentsSeed: FiscalDocument[] = [
     venda: "VD-1042",
     data: "11/05/2026 10:18",
     createdAt: "2026-05-11T10:18:00-03:00",
-    cliente: "Consumidor não identificado",
+    cliente: "Consumidor nÃ£o identificado",
     total: 183.72,
     status: "AUTORIZADA",
     numero: "000012",
@@ -275,7 +278,7 @@ const documentsSeed: FiscalDocument[] = [
     venda: "VD-1044",
     data: "11/05/2026 11:08",
     createdAt: "2026-05-11T11:08:00-03:00",
-    cliente: "Consumidor não identificado",
+    cliente: "Consumidor nÃ£o identificado",
     total: 32.89,
     status: "NAO_EMITIDA",
     formaPagamento: "Dinheiro"
@@ -379,6 +382,40 @@ type CsvProductImport = {
   errors: string[];
 };
 
+type StockXmlItem = {
+  codigo: string;
+  codigoBarras?: string;
+  descricao: string;
+  quantidade: number;
+  valorUnitario: number;
+  valorTotal: number;
+  unidade?: string;
+  ncm?: string;
+  cfop?: string;
+};
+
+type StockXmlImport = {
+  items: StockXmlItem[];
+  errors: string[];
+  chaveAcesso?: string;
+  numero?: string;
+  emitente?: string;
+  total?: number;
+};
+
+type StockXmlMovementInput = StockXmlItem & {
+  produtoId: string;
+  produtoDescricao: string;
+  documentoOrigem?: string;
+};
+
+type InvoiceProductImportInput = StockXmlItem & {
+  precoVenda: number;
+  produtoId?: string;
+  produtoDescricao?: string;
+  documentoOrigem?: string;
+};
+
 const normalizeCsvKey = (value: string) =>
   value
     .trim()
@@ -391,13 +428,13 @@ const normalizeCsvKey = (value: string) =>
 const csvColumnAliases: Record<string, string[]> = {
   codigo: ["codigo", "codigo_interno", "sku"],
   codigoBarras: ["codigo_barras", "cod_barras", "barras", "ean", "gtin"],
-  descricao: ["descricao", "descrição", "nome", "produto"],
+  descricao: ["descricao", "descriÃ§Ã£o", "nome", "produto"],
   categoria: ["categoria", "grupo"],
   marca: ["marca", "fabricante"],
-  precoCusto: ["preco_custo", "preço_custo", "custo"],
-  precoVenda: ["preco_venda", "preço_venda", "preco", "preço", "venda"],
+  precoCusto: ["preco_custo", "preÃ§o_custo", "custo"],
+  precoVenda: ["preco_venda", "preÃ§o_venda", "preco", "preÃ§o", "venda"],
   estoqueAtual: ["estoque_atual", "estoque", "saldo"],
-  estoqueMinimo: ["estoque_minimo", "estoque_mínimo", "minimo", "mínimo"],
+  estoqueMinimo: ["estoque_minimo", "estoque_mÃ­nimo", "minimo", "mÃ­nimo"],
   unidade: ["unidade", "un"],
   ncm: ["ncm"],
   cest: ["cest"],
@@ -405,7 +442,7 @@ const csvColumnAliases: Record<string, string[]> = {
   origem: ["origem"],
   csosn: ["csosn"],
   cst: ["cst"],
-  aliquotaIcms: ["aliquota_icms", "alíquota_icms", "icms"],
+  aliquotaIcms: ["aliquota_icms", "alÃ­quota_icms", "icms"],
   unidadeComercialFiscal: ["unidade_comercial_fiscal", "unidade_fiscal", "un_fiscal"]
 };
 
@@ -460,6 +497,201 @@ function parseCsvNumber(value: string | undefined, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function parseXmlNumber(value: string | undefined, fallback = 0) {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  const normalized = trimmed.includes(",") ? trimmed.replace(/\./g, "").replace(",", ".") : trimmed;
+  const parsed = Number(normalized.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getXmlText(parent: Element | Document, tagName: string) {
+  const byNamespace = parent.getElementsByTagNameNS("*", tagName)[0];
+  const byName = parent.getElementsByTagName(tagName)[0];
+  return (byNamespace ?? byName)?.textContent?.trim() ?? "";
+}
+
+function parseStockXml(text: string): StockXmlImport {
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(text, "application/xml");
+  const parseError = xml.getElementsByTagName("parsererror")[0];
+  const errors: string[] = [];
+  const items: StockXmlItem[] = [];
+
+  if (parseError) return { items, errors: ["XML invÃ¡lido ou corrompido."] };
+
+  const detNodes = Array.from(xml.getElementsByTagNameNS("*", "det"));
+  const detFallback = Array.from(xml.getElementsByTagName("det"));
+  const details = detNodes.length ? detNodes : detFallback;
+
+  if (!details.length) return { items, errors: ["Nenhum item de produto encontrado no XML."] };
+
+  details.forEach((det, index) => {
+    const prod = det.getElementsByTagNameNS("*", "prod")[0] ?? det.getElementsByTagName("prod")[0];
+    if (!prod) {
+      errors.push(`Item ${index + 1}: grupo prod nÃ£o encontrado.`);
+      return;
+    }
+
+    const codigo = getXmlText(prod, "cProd");
+    const descricao = getXmlText(prod, "xProd");
+    const quantidade = parseXmlNumber(getXmlText(prod, "qCom"), NaN);
+    const valorTotal = parseXmlNumber(getXmlText(prod, "vProd"), NaN);
+    const valorUnitario = parseXmlNumber(getXmlText(prod, "vUnCom"), valorTotal / quantidade);
+
+    if (!codigo || !descricao || !Number.isFinite(quantidade) || quantidade <= 0 || !Number.isFinite(valorTotal)) {
+      errors.push(`Item ${index + 1}: cÃ³digo, descriÃ§Ã£o, quantidade ou valor invÃ¡lido.`);
+      return;
+    }
+
+    items.push({
+      codigo,
+      codigoBarras: getXmlText(prod, "cEAN") || getXmlText(prod, "cEANTrib") || undefined,
+      descricao,
+      quantidade,
+      valorUnitario: Number.isFinite(valorUnitario) ? valorUnitario : valorTotal / quantidade,
+      valorTotal,
+      unidade: getXmlText(prod, "uCom") || undefined,
+      ncm: getXmlText(prod, "NCM") || undefined,
+      cfop: getXmlText(prod, "CFOP") || undefined
+    });
+  });
+
+  const chaveAcesso = xml.getElementsByTagNameNS("*", "infNFe")[0]?.getAttribute("Id")?.replace(/^NFe/i, "") || undefined;
+  const totalXml = getXmlText(xml, "vNF");
+  return {
+    items,
+    errors,
+    chaveAcesso,
+    numero: getXmlText(xml, "nNF") || undefined,
+    emitente: getXmlText(xml, "xNome") || undefined,
+    total: totalXml ? parseXmlNumber(totalXml) : undefined
+  };
+}
+
+const moneyLikePattern = /^\d{1,3}(?:\.\d{3})*,\d{2}$|^\d+,\d{2}$/;
+
+function isMoneyLike(value: string) {
+  return moneyLikePattern.test(value.trim());
+}
+
+function isNcmLike(value: string) {
+  return /^\d{8}$/.test(value.trim());
+}
+
+function isCfopLike(value: string) {
+  return /^\d{4}$/.test(value.trim());
+}
+
+function isUnitLike(value: string) {
+  return /^[A-Z]{1,6}$/.test(value.trim());
+}
+
+function parseStockPdfText(text: string): StockXmlImport {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const errors: string[] = [];
+  const items: StockXmlItem[] = [];
+  const start = lines.findIndex((line) => line.toUpperCase().includes("DADOS DOS PRODUTOS"));
+  const endCandidates = ["RESERVADO AO FISCO", "INFORMAÃ‡Ã•ES COMPLEMENTARES", "INFORMACOES COMPLEMENTARES", "DADOS ADICIONAIS"];
+  const end = lines.findIndex((line, index) => index > start && endCandidates.some((marker) => line.toUpperCase().includes(marker)));
+  const section = lines.slice(Math.max(start, 0), end > start ? end : undefined);
+
+  if (start < 0 || !section.length) {
+    return { items, errors: ["NÃ£o encontrei a tabela de produtos no PDF."] };
+  }
+
+  let index = section.findIndex((line) => line.toUpperCase().includes("ALÃQ") || line.toUpperCase().includes("ALIQ"));
+  index = index >= 0 ? index + 1 : 0;
+
+  while (index < section.length) {
+    const codigo = section[index];
+    const ncmIndex = section.findIndex((line, position) => position > index && position <= index + 8 && isNcmLike(line));
+
+    if (!codigo || codigo.includes("/") || codigo.toUpperCase().includes("CÃ“DIGO") || codigo.toUpperCase().includes("CODIGO")) {
+      index += 1;
+      continue;
+    }
+
+    if (ncmIndex < 0) {
+      index += 1;
+      continue;
+    }
+
+    const descricao = section.slice(index + 1, ncmIndex).join(" ").trim();
+    const ncm = section[ncmIndex];
+    const cfopIndex = section.findIndex((line, position) => position > ncmIndex && position <= ncmIndex + 5 && isCfopLike(line));
+    const cfop = section[cfopIndex];
+    const unitIndex = section.findIndex((line, position) => position > cfopIndex && position <= cfopIndex + 3 && isUnitLike(line));
+    const quantidadeText = section[unitIndex + 1];
+    const valorUnitarioText = section[unitIndex + 2];
+    const valorTotalText = section[unitIndex + 4] && isMoneyLike(section[unitIndex + 4]) ? section[unitIndex + 4] : section[unitIndex + 3];
+    const quantidade = parseXmlNumber(quantidadeText, NaN);
+    const valorUnitario = parseXmlNumber(valorUnitarioText, NaN);
+    const valorTotal = parseXmlNumber(valorTotalText, NaN);
+
+    if (!descricao || cfopIndex < 0 || unitIndex < 0 || !Number.isFinite(quantidade) || !Number.isFinite(valorUnitario) || !Number.isFinite(valorTotal)) {
+      errors.push(`Produto ${codigo}: nÃ£o foi possÃ­vel ler quantidade ou valor.`);
+      index = Math.max(ncmIndex + 1, index + 1);
+      continue;
+    }
+
+    items.push({
+      codigo,
+      descricao,
+      quantidade,
+      valorUnitario,
+      valorTotal,
+      unidade: section[unitIndex],
+      ncm,
+      cfop
+    });
+    index = unitIndex + 5;
+  }
+
+  if (!items.length && !errors.length) errors.push("Nenhum item vÃ¡lido encontrado no PDF.");
+
+  const chaveLineIndex = lines.findIndex((line) => line.toUpperCase().includes("CHAVE DE ACESSO"));
+  const chaveAcesso = lines
+    .slice(chaveLineIndex + 1, chaveLineIndex + 5)
+    .find((line) => /^\d[\d\s]{30,}$/.test(line))
+    ?.replace(/\s+/g, "");
+  const numero = lines.find((line) => /^N[ÂºÂ°]\s*\d/i.test(line))?.replace(/^N[ÂºÂ°]\s*/i, "");
+  const emitente = lines[lines.findIndex((line) => line.toUpperCase().includes("DANFE")) + 1];
+  const totalIndex = lines.findIndex((line) => line.toUpperCase().includes("VALOR TOTAL DA NOTA"));
+  const totalText = totalIndex >= 0 ? lines[totalIndex + 1] : "";
+  const total = totalText ? parseXmlNumber(totalText) : undefined;
+
+  return {
+    items,
+    errors,
+    chaveAcesso,
+    numero,
+    emitente: emitente && !emitente.toUpperCase().includes("DOCUMENTO") ? emitente : undefined,
+    total: Number.isFinite(total) ? total : undefined
+  };
+}
+
+async function parseStockPdf(file: File): Promise<StockXmlImport> {
+  const [pdfjsLib, workerModule] = await Promise.all([
+    import("pdfjs-dist/legacy/build/pdf.mjs"),
+    import("pdfjs-dist/legacy/build/pdf.worker.mjs?url")
+  ]);
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+  const document = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pages.push(content.items.map((item) => ("str" in item ? item.str : "")).join("\n"));
+  }
+
+  return parseStockPdfText(pages.join("\n"));
+}
+
 function parseProductsCsv(text: string): CsvProductImport {
   const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
   const delimiter = (firstLine.match(/;/g)?.length ?? 0) >= (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
@@ -468,7 +700,7 @@ function parseProductsCsv(text: string): CsvProductImport {
   const errors: string[] = [];
   const valid: Omit<ProductInput, "empresaId">[] = [];
 
-  if (!header?.length) return { valid, errors: ["CSV sem cabeçalho."] };
+  if (!header?.length) return { valid, errors: ["CSV sem cabeÃ§alho."] };
 
   const normalizedHeader = header.map(normalizeCsvKey);
   const getCell = (row: string[], field: keyof typeof csvColumnAliases) => {
@@ -485,7 +717,7 @@ function parseProductsCsv(text: string): CsvProductImport {
     const cfop = getCell(row, "cfop") || "5102";
 
     if (!codigo || !descricao || !Number.isFinite(precoVenda) || precoVenda <= 0 || !ncm) {
-      errors.push(`Linha ${line}: código, descrição, preço de venda e NCM são obrigatórios.`);
+      errors.push(`Linha ${line}: cÃ³digo, descriÃ§Ã£o, preÃ§o de venda e NCM sÃ£o obrigatÃ³rios.`);
       return;
     }
 
@@ -538,6 +770,7 @@ export function App() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Pix");
   const [consumerCpf, setConsumerCpf] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [receiptSale, setReceiptSale] = useState<SaleRecord | null>(null);
   const [toast, setToast] = useState("");
 
   const subtotal = cart.reduce((sum, item) => sum + item.product.precoVenda * item.quantidade, 0);
@@ -550,7 +783,7 @@ export function App() {
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
-    if (!term) return products;
+    if (!term) return [];
     return products.filter(
       (product) =>
         product.descricao.toLowerCase().includes(term) ||
@@ -641,7 +874,7 @@ export function App() {
     try {
       const result = await createRetailerAccount(input);
       if (result.needsEmailConfirmation) {
-        setToast("Conta criada. Confirme o e-mail e faça login para ativar a empresa.");
+        setToast("Conta criada. Confirme o e-mail e faÃ§a login para ativar a empresa.");
         return;
       }
       setIsAuthenticated(true);
@@ -656,22 +889,22 @@ export function App() {
     try {
       await createCompanyForCurrentUser(input);
       await refreshRemoteData();
-      setToast("Empresa criada. Seus dados já estão isolados por RLS.");
+      setToast("Empresa criada. Seus dados jÃ¡ estÃ£o isolados por RLS.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Falha ao criar empresa.");
     }
   }
 
   function addToCart(product: Product) {
-    if (!product.ativo) return setToast("Produto inativo não pode ser vendido.");
-    if (!allowNegativeStock && product.estoqueAtual <= 0) return setToast("Estoque indisponível para este produto.");
-    if (!product.precoVenda || product.precoVenda <= 0) return setToast("Produto sem preço válido.");
+    if (!product.ativo) return setToast("Produto inativo nÃ£o pode ser vendido.");
+    if (!allowNegativeStock && product.estoqueAtual <= 0) return setToast("Estoque indisponÃ­vel para este produto.");
+    if (!product.precoVenda || product.precoVenda <= 0) return setToast("Produto sem preÃ§o vÃ¡lido.");
 
     setCart((current) => {
       const existing = current.find((item) => item.product.id === product.id);
       if (existing) {
         if (!allowNegativeStock && existing.quantidade + 1 > product.estoqueAtual) {
-          setToast("Quantidade maior que o estoque disponível.");
+          setToast("Quantidade maior que o estoque disponÃ­vel.");
           return current;
         }
         return current.map((item) =>
@@ -712,13 +945,47 @@ export function App() {
   function validateSale() {
     if (!cart.length) return "Adicione pelo menos um produto para vender.";
     if (cart.some((item) => item.quantidade <= 0)) return "Quantidade deve ser maior que zero.";
-    if (!allowNegativeStock && cart.some((item) => item.quantidade > item.product.estoqueAtual)) return "Há item acima do estoque disponível.";
-    if (cart.some((item) => item.product.precoVenda <= 0)) return "Há produto sem preço válido.";
-    if (discountTotal > subtotal) return "Desconto não pode ser maior que o total.";
+    if (!allowNegativeStock && cart.some((item) => item.quantidade > item.product.estoqueAtual)) return "HÃ¡ item acima do estoque disponÃ­vel.";
+    if (cart.some((item) => item.product.precoVenda <= 0)) return "HÃ¡ produto sem preÃ§o vÃ¡lido.";
+    if (discountTotal > subtotal) return "Desconto nÃ£o pode ser maior que o total.";
     if (generalSettings?.exigirCpfAcimaDe !== undefined && cartTotal >= generalSettings.exigirCpfAcimaDe && !consumerCpf.trim()) {
-      return `CPF do consumidor obrigatório acima de ${formatMoney(generalSettings.exigirCpfAcimaDe)}.`;
+      return `CPF do consumidor obrigatÃ³rio acima de ${formatMoney(generalSettings.exigirCpfAcimaDe)}.`;
     }
     return "";
+  }
+
+  function buildSaleReceiptSnapshot(vendaId: string, statusFiscal: FiscalStatus, usuarioId = "demo"): SaleRecord {
+    const now = new Date();
+    return {
+      id: vendaId,
+      numero: vendaId,
+      data: now.toLocaleString("pt-BR"),
+      createdAt: now.toISOString(),
+      usuarioId,
+      clienteCpf: consumerCpf || undefined,
+      subtotal,
+      descontoTotal: discountTotal,
+      total: cartTotal,
+      formaPagamento: paymentMethod,
+      statusVenda: "FINALIZADA",
+      statusFiscal,
+      estoqueBaixado: decreaseStockOnSale,
+      itens: cart.map((item) => ({
+        id: crypto.randomUUID(),
+        produtoId: item.product.id,
+        codigo: item.product.codigo,
+        codigoBarras: item.product.codigoBarras,
+        descricao: item.product.descricao,
+        quantidade: item.quantidade,
+        valorUnitario: item.product.precoVenda,
+        desconto: item.desconto,
+        total: item.product.precoVenda * item.quantidade - item.desconto,
+        ncm: item.product.ncm,
+        cfop: item.product.cfop,
+        csosn: item.product.csosn,
+        cst: item.product.cst
+      }))
+    };
   }
 
   async function finishSale(emitFiscal: boolean) {
@@ -730,7 +997,7 @@ export function App() {
 
     const hasFiscalGap = cart.some((item) => !item.product.ncm || !item.product.cfop || (!item.product.csosn && !item.product.cst));
     if (emitFiscal && hasFiscalGap) {
-      setToast("NFC-e bloqueada: existe produto sem dados fiscais mínimos.");
+      setToast("NFC-e bloqueada: existe produto sem dados fiscais mÃ­nimos.");
       return;
     }
 
@@ -749,17 +1016,19 @@ export function App() {
           formaPagamento: paymentMethod,
           descontoTotal: globalDiscount
         });
+        const saleReceipt = buildSaleReceiptSnapshot(vendaId, emitFiscal ? "ENVIANDO" : "NAO_EMITIDA", companyContext.perfil);
 
         if (emitFiscal) {
           const { error: fiscalError } = await invokeFiscalFunction("emitir-nfce", { venda_id: vendaId });
           if (fiscalError) throw fiscalError;
         }
 
+        setReceiptSale(saleReceipt);
         setCart([]);
         setGlobalDiscount(0);
         setConsumerCpf("");
         await refreshRemoteData();
-        setToast(emitFiscal ? "Venda salva e enviada para emissão NFC-e." : "Venda salva com baixa de estoque.");
+        setToast(emitFiscal ? "Venda salva e enviada para emissÃ£o NFC-e." : "Venda salva com baixa de estoque.");
       } catch (remoteError) {
         setToast(remoteError instanceof Error ? remoteError.message : "Falha ao finalizar venda.");
       }
@@ -767,6 +1036,7 @@ export function App() {
     }
 
     const vendaId = `VD-${Math.floor(1100 + Math.random() * 500)}`;
+    const saleRecord = buildSaleReceiptSnapshot(vendaId, emitFiscal ? "ENVIANDO" : "NAO_EMITIDA");
     if (decreaseStockOnSale) {
       setProducts((current) =>
         current.map((product) => {
@@ -783,7 +1053,7 @@ export function App() {
         venda: vendaId,
         data: new Date().toLocaleString("pt-BR"),
         createdAt: new Date().toISOString(),
-        cliente: consumerCpf ? "Consumidor identificado" : "Consumidor não identificado",
+        cliente: consumerCpf ? "Consumidor identificado" : "Consumidor nÃ£o identificado",
         cpf: consumerCpf || undefined,
         total: cartTotal,
         status: emitFiscal ? "ENVIANDO" : "NAO_EMITIDA",
@@ -792,43 +1062,15 @@ export function App() {
       ...current
     ]);
     setSales((current) => [
-      {
-        id: vendaId,
-        numero: vendaId,
-        data: new Date().toLocaleString("pt-BR"),
-        createdAt: new Date().toISOString(),
-        usuarioId: "demo",
-        clienteCpf: consumerCpf || undefined,
-        subtotal,
-        descontoTotal: discountTotal,
-        total: cartTotal,
-        formaPagamento: paymentMethod,
-        statusVenda: "FINALIZADA",
-        statusFiscal: emitFiscal ? "ENVIANDO" : "NAO_EMITIDA",
-        estoqueBaixado: decreaseStockOnSale,
-        itens: cart.map((item) => ({
-          id: crypto.randomUUID(),
-          produtoId: item.product.id,
-          codigo: item.product.codigo,
-          codigoBarras: item.product.codigoBarras,
-          descricao: item.product.descricao,
-          quantidade: item.quantidade,
-          valorUnitario: item.product.precoVenda,
-          desconto: item.desconto,
-          total: item.product.precoVenda * item.quantidade - item.desconto,
-          ncm: item.product.ncm,
-          cfop: item.product.cfop,
-          csosn: item.product.csosn,
-          cst: item.product.cst
-        }))
-      },
+      saleRecord,
       ...current
     ]);
 
+    setReceiptSale(saleRecord);
     setCart([]);
     setGlobalDiscount(0);
     setConsumerCpf("");
-    setToast(emitFiscal ? "Venda confirmada. Emissão NFC-e deve seguir pela Edge Function." : "Venda finalizada sem emissão fiscal.");
+    setToast(emitFiscal ? "Venda confirmada. EmissÃ£o NFC-e deve seguir pela Edge Function." : "Venda finalizada sem emissÃ£o fiscal.");
   }
 
   async function triggerFiscalAction(action: "reenviar-nfce" | "consultar-nfce" | "cancelar-nfce", document: FiscalDocument) {
@@ -840,7 +1082,7 @@ export function App() {
           : { documento_fiscal_id: document.id };
 
     const { error } = await invokeFiscalFunction(action, payload);
-    setToast(error ? error.message : `Solicitação enviada para ${action}.`);
+    setToast(error ? error.message : `SolicitaÃ§Ã£o enviada para ${action}.`);
   }
 
   async function handleFiscalFiles(document: FiscalDocument) {
@@ -878,7 +1120,7 @@ export function App() {
       try {
         await cancelRemoteSale({ vendaId: sale.id, motivo, estornarEstoque: restoreStockOnCancel });
         await refreshRemoteData();
-        setToast(restoreStockOnCancel ? "Venda cancelada e estoque estornado com histórico." : "Venda cancelada sem estorno automático de estoque.");
+        setToast(restoreStockOnCancel ? "Venda cancelada e estoque estornado com histÃ³rico." : "Venda cancelada sem estorno automÃ¡tico de estoque.");
       } catch (error) {
         setToast(error instanceof Error ? error.message : "Falha ao cancelar venda.");
       }
@@ -906,7 +1148,51 @@ export function App() {
         })
       );
     }
-    setToast(restoreStockOnCancel ? "Venda demo cancelada e estoque estornado." : "Venda demo cancelada sem estorno automático.");
+    setToast(restoreStockOnCancel ? "Venda demo cancelada e estoque estornado." : "Venda demo cancelada sem estorno automÃ¡tico.");
+  }
+
+  async function handleSettleSaleStock(sale: SaleRecord) {
+    if (sale.statusVenda === "CANCELADA") {
+      setToast("Venda cancelada nÃ£o permite baixa de estoque.");
+      return;
+    }
+
+    if (sale.estoqueBaixado) {
+      setToast("Estoque desta venda jÃ¡ foi baixado.");
+      return;
+    }
+
+    if (remoteMode) {
+      try {
+        await settleRemoteSaleStock(sale.id);
+        await refreshRemoteData();
+        setToast("Estoque da venda baixado com histÃ³rico.");
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : "Falha ao baixar estoque da venda.");
+      }
+      return;
+    }
+
+    if (!allowNegativeStock) {
+      const insufficient = sale.itens.find((item) => {
+        const product = products.find((candidate) => candidate.id === item.produtoId);
+        return !product || product.estoqueAtual < item.quantidade;
+      });
+
+      if (insufficient) {
+        setToast(`Estoque insuficiente para ${insufficient.descricao}.`);
+        return;
+      }
+    }
+
+    setProducts((current) =>
+      current.map((product) => {
+        const saleItem = sale.itens.find((item) => item.produtoId === product.id);
+        return saleItem ? { ...product, estoqueAtual: product.estoqueAtual - saleItem.quantidade } : product;
+      })
+    );
+    setSales((current) => current.map((item) => (item.id === sale.id ? { ...item, estoqueBaixado: true } : item)));
+    setToast("Estoque da venda demo baixado.");
   }
 
   function buildLocalProduct(input: Omit<ProductInput, "empresaId">): Product {
@@ -945,7 +1231,7 @@ export function App() {
       try {
         const product = await createRemoteProduct({ ...input, empresaId: companyContext.empresaId });
         setProducts((current) => [product, ...current]);
-        setToast("Produto cadastrado com segurança fiscal.");
+        setToast("Produto cadastrado com seguranÃ§a fiscal.");
       } catch (error) {
         setToast(error instanceof Error ? error.message : "Falha ao cadastrar produto.");
       }
@@ -975,18 +1261,18 @@ export function App() {
       ativo: true
     };
     setProducts((current) => [buildLocalProduct(input), ...current]);
-    setToast("Produto cadastrado no modo demonstração.");
+    setToast("Produto cadastrado no modo demonstraÃ§Ã£o.");
   }
 
   async function handleImportProducts(inputs: Omit<ProductInput, "empresaId">[]) {
-    if (!inputs.length) return setToast("Nenhum produto válido para importar.");
+    if (!inputs.length) return setToast("Nenhum produto vÃ¡lido para importar.");
 
     if (remoteMode && companyContext) {
       const licenseMessage = licenseBlockMessage(companyContext);
-      if (licenseMessage) return setToast(`Importação bloqueada: ${licenseMessage}`);
+      if (licenseMessage) return setToast(`ImportaÃ§Ã£o bloqueada: ${licenseMessage}`);
       const available = Math.max(0, (companyContext.license?.limiteProdutos ?? 0) - (companyContext.license?.produtosAtivos ?? products.length));
       if (inputs.length > available) {
-        return setToast(`Importação bloqueada: o plano permite mais ${available} produto(s) ativos.`);
+        return setToast(`ImportaÃ§Ã£o bloqueada: o plano permite mais ${available} produto(s) ativos.`);
       }
 
       try {
@@ -1001,14 +1287,112 @@ export function App() {
     }
 
     setProducts((current) => [...inputs.map(buildLocalProduct), ...current]);
-    setToast(`${inputs.length} produto(s) importado(s) no modo demonstração.`);
+    setToast(`${inputs.length} produto(s) importado(s) no modo demonstraÃ§Ã£o.`);
+  }
+
+  async function handleImportInvoiceProducts(items: InvoiceProductImportInput[]) {
+    if (!items.length) return setToast("Informe o valor de venda dos produtos da nota.");
+
+    const newItems = items.filter((item) => !item.produtoId);
+    const existingItems = items.filter((item) => item.produtoId);
+
+    if (remoteMode && companyContext) {
+      const licenseMessage = licenseBlockMessage(companyContext);
+      if (licenseMessage) return setToast(`Entrada bloqueada: ${licenseMessage}`);
+      const available = Math.max(0, (companyContext.license?.limiteProdutos ?? 0) - (companyContext.license?.produtosAtivos ?? products.length));
+      if (newItems.length > available) return setToast(`Entrada bloqueada: o plano permite mais ${available} produto(s) ativos.`);
+
+      try {
+        if (newItems.length) {
+          await createRemoteProducts(
+            newItems.map((item) => ({
+              empresaId: companyContext.empresaId,
+              codigo: item.codigo,
+              codigoBarras: item.codigoBarras,
+              descricao: item.descricao,
+              categoria: "Importado NF-e",
+              marca: "",
+              precoCusto: item.valorUnitario,
+              precoVenda: item.precoVenda,
+              estoqueAtual: item.quantidade,
+              estoqueMinimo: 0,
+              unidade: item.unidade || "UN",
+              ncm: item.ncm || "",
+              cest: "",
+              cfop: item.cfop || "5102",
+              origem: "0",
+              csosn: "102",
+              cst: "",
+              aliquotaIcms: undefined,
+              unidadeComercialFiscal: item.unidade || "UN"
+            }))
+          );
+        }
+
+        for (const item of existingItems) {
+          if (!item.produtoId) continue;
+          await updateRemoteProductPricing({
+            productId: item.produtoId,
+            precoCusto: item.valorUnitario,
+            precoVenda: item.precoVenda
+          });
+          await createRemoteStockMovement({
+            empresaId: companyContext.empresaId,
+            produtoId: item.produtoId,
+            tipo: "ENTRADA_MANUAL",
+            quantidade: item.quantidade,
+            valorUnitario: item.valorUnitario,
+            valorTotal: item.valorTotal,
+            documentoOrigem: item.documentoOrigem,
+            observacao: `Entrada por nota e atualizaÃ§Ã£o de preÃ§o de venda${item.documentoOrigem ? ` ${item.documentoOrigem}` : ""}: ${item.codigo} - ${item.descricao}`
+          });
+        }
+
+        await refreshRemoteData();
+        setToast(`${newItems.length} produto(s) criado(s) e ${existingItems.length} produto(s) atualizado(s).`);
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : "Falha ao importar nota em produtos.");
+      }
+      return;
+    }
+
+    setProducts((current) => {
+      const updated = current.map((product) => {
+        const item = existingItems.find((candidate) => candidate.produtoId === product.id);
+        return item ? { ...product, precoCusto: item.valorUnitario, precoVenda: item.precoVenda, estoqueAtual: product.estoqueAtual + item.quantidade } : product;
+      });
+      const created = newItems.map((item) =>
+        buildLocalProduct({
+          codigo: item.codigo,
+          codigoBarras: item.codigoBarras,
+          descricao: item.descricao,
+          categoria: "Importado NF-e",
+          marca: "",
+          precoCusto: item.valorUnitario,
+          precoVenda: item.precoVenda,
+          estoqueAtual: item.quantidade,
+          estoqueMinimo: 0,
+          unidade: item.unidade || "UN",
+          ncm: item.ncm || "",
+          cest: "",
+          cfop: item.cfop || "5102",
+          origem: "0",
+          csosn: "102",
+          cst: "",
+          aliquotaIcms: undefined,
+          unidadeComercialFiscal: item.unidade || "UN"
+        })
+      );
+      return [...created, ...updated];
+    });
+    setToast(`${newItems.length} produto(s) criado(s) e ${existingItems.length} produto(s) atualizado(s) no modo demonstraÃ§Ã£o.`);
   }
 
   async function handleToggleProduct(product: Product) {
     if (remoteMode) {
-      if (!licenseCanOperate(companyContext)) return setToast(`Alteração bloqueada: ${licenseBlockMessage(companyContext)}`);
+      if (!licenseCanOperate(companyContext)) return setToast(`AlteraÃ§Ã£o bloqueada: ${licenseBlockMessage(companyContext)}`);
       if (!product.ativo && !licenseCanCreateProduct(companyContext)) {
-        return setToast("Ativação bloqueada: limite de produtos atingido para o plano contratado.");
+        return setToast("AtivaÃ§Ã£o bloqueada: limite de produtos atingido para o plano contratado.");
       }
 
       try {
@@ -1042,20 +1426,62 @@ export function App() {
     setCustomers((current) => [{ ...input, id: crypto.randomUUID() }, ...current]);
   }
 
-  async function handleCreateStockMovement(input: { produtoId: string; tipo: string; quantidade: number; observacao?: string }) {
+  async function handleCreateStockMovement(input: {
+    produtoId: string;
+    tipo: string;
+    quantidade: number;
+    observacao?: string;
+    valorUnitario?: number;
+    valorTotal?: number;
+    documentoOrigem?: string;
+  }) {
     if (!companyContext || !remoteMode) {
-      setToast("Movimentação de estoque exige Supabase conectado.");
+      setToast("MovimentaÃ§Ã£o de estoque exige Supabase conectado.");
       return;
     }
 
-    if (!licenseCanOperate(companyContext)) return setToast(`Movimentação bloqueada: ${licenseBlockMessage(companyContext)}`);
+    if (!licenseCanOperate(companyContext)) return setToast(`MovimentaÃ§Ã£o bloqueada: ${licenseBlockMessage(companyContext)}`);
 
     try {
       await createRemoteStockMovement({ ...input, empresaId: companyContext.empresaId });
       await refreshRemoteData();
-      setToast("Estoque movimentado com histórico.");
+      setToast("Estoque movimentado com histÃ³rico.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Falha ao movimentar estoque.");
+    }
+  }
+
+  async function handleImportStockXml(items: StockXmlMovementInput[]) {
+    if (!items.length) {
+      setToast("Nenhum item do XML foi vinculado a produto cadastrado.");
+      return;
+    }
+
+    if (!companyContext || !remoteMode) {
+      setToast("ImportaÃ§Ã£o de XML no estoque exige Supabase conectado.");
+      return;
+    }
+
+    if (!licenseCanOperate(companyContext)) return setToast(`ImportaÃ§Ã£o bloqueada: ${licenseBlockMessage(companyContext)}`);
+
+    try {
+      for (const item of items) {
+        await createRemoteStockMovement({
+          empresaId: companyContext.empresaId,
+          produtoId: item.produtoId,
+          tipo: "ENTRADA_MANUAL",
+          quantidade: item.quantidade,
+          valorUnitario: item.valorUnitario,
+          valorTotal: item.valorTotal,
+          documentoOrigem: item.documentoOrigem,
+          observacao: `Entrada por XML NF-e${item.documentoOrigem ? ` ${item.documentoOrigem}` : ""}: ${item.codigo} - ${item.descricao}`
+        });
+      }
+
+      await refreshRemoteData();
+      setToast(`${items.length} item(ns) importado(s) do XML para o estoque.`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Falha ao importar XML no estoque.");
     }
   }
 
@@ -1068,16 +1494,16 @@ export function App() {
     certificadoPath?: string;
   }) {
     if (!companyContext) {
-      setToast("Empresa não carregada.");
+      setToast("Empresa nÃ£o carregada.");
       return;
     }
 
     try {
       const settings = await saveFiscalSettings({ ...input, empresaId: companyContext.empresaId });
       setFiscalSettings(settings);
-      setToast("Configuração fiscal salva com segurança.");
+      setToast("ConfiguraÃ§Ã£o fiscal salva com seguranÃ§a.");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Falha ao salvar configuração fiscal.");
+      setToast(error instanceof Error ? error.message : "Falha ao salvar configuraÃ§Ã£o fiscal.");
     }
   }
 
@@ -1106,22 +1532,22 @@ export function App() {
   }
 
   async function handleCreateCompanyUser(input: { email: string; nome?: string; perfil: string; password?: string }) {
-    if (!companyContext) return setToast("Empresa não carregada.");
+    if (!companyContext) return setToast("Empresa nÃ£o carregada.");
     const licenseMessage = licenseBlockMessage(companyContext);
-    if (licenseMessage) return setToast(`Usuário bloqueado: ${licenseMessage}`);
-    if (!licenseCanCreateUser(companyContext)) return setToast("Usuário bloqueado: limite de usuários atingido para o plano contratado.");
+    if (licenseMessage) return setToast(`UsuÃ¡rio bloqueado: ${licenseMessage}`);
+    if (!licenseCanCreateUser(companyContext)) return setToast("UsuÃ¡rio bloqueado: limite de usuÃ¡rios atingido para o plano contratado.");
 
     try {
       const result: any = await createCompanyUser({ ...input, empresaId: companyContext.empresaId });
       setCompanyUsers(await loadCompanyUsers(companyContext.empresaId));
-      setToast(`Usuário criado. Senha temporária: ${result?.temporary_password ?? "definida manualmente"}`);
+      setToast(`UsuÃ¡rio criado. Senha temporÃ¡ria: ${result?.temporary_password ?? "definida manualmente"}`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Falha ao criar usuário.");
+      setToast(error instanceof Error ? error.message : "Falha ao criar usuÃ¡rio.");
     }
   }
 
   async function handleUpdateCompanyUser(input: { usuariosEmpresasId: string; perfil?: string; ativo?: boolean }) {
-    if (!companyContext) return setToast("Empresa não carregada.");
+    if (!companyContext) return setToast("Empresa nÃ£o carregada.");
     try {
       await updateCompanyUser({ ...input, empresaId: companyContext.empresaId });
       setCompanyUsers(await loadCompanyUsers(companyContext.empresaId));
@@ -1132,14 +1558,14 @@ export function App() {
   }
 
   async function handleSaveGeneralSettings(input: Omit<GeneralSettings, "empresaId">) {
-    if (!companyContext) return setToast("Empresa não carregada.");
+    if (!companyContext) return setToast("Empresa nÃ£o carregada.");
 
     try {
       const settings = await saveGeneralSettings({ ...input, empresaId: companyContext.empresaId });
       setGeneralSettings(settings);
-      setToast("Configurações gerais salvas para produção.");
+      setToast("ConfiguraÃ§Ãµes gerais salvas para produÃ§Ã£o.");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Falha ao salvar configurações gerais.");
+      setToast(error instanceof Error ? error.message : "Falha ao salvar configuraÃ§Ãµes gerais.");
     }
   }
 
@@ -1171,7 +1597,7 @@ export function App() {
         onCollapse={() => setSidebarCollapsed((value) => !value)}
             onNavigate={(moduleId) => {
               if (!canAccessModule(companyContext?.perfil, moduleId, Boolean(superAdminProfile))) {
-                setToast("Seu perfil não tem acesso a este módulo.");
+                setToast("Seu perfil nÃ£o tem acesso a este mÃ³dulo.");
                 return;
               }
               setActiveModule(moduleId);
@@ -1193,7 +1619,7 @@ export function App() {
             {companyContext?.perfil && <span className="company-pill">{companyContext.perfil}</span>}
             {companyContext?.license && <span className="company-pill">{companyContext.license.planoNome} | {companyContext.license.status}</span>}
             {loadingRemote && <span className="company-pill">Sincronizando</span>}
-            <button className="icon-button" aria-label="Notificações">
+            <button className="icon-button" aria-label="NotificaÃ§Ãµes">
               <Bell size={18} />
             </button>
             <button className="icon-button" aria-label="Sair" onClick={() => setIsAuthenticated(false)}>
@@ -1249,12 +1675,21 @@ export function App() {
             compactMode={generalSettings?.pdvModoCompacto ?? false}
           />
         )}
-        {activeModule === "vendas" && <SalesHistoryModule sales={sales} onCancel={handleCancelSale} restoreStockOnCancel={restoreStockOnCancel} />}
+        {activeModule === "vendas" && (
+          <SalesHistoryModule
+            sales={sales}
+            onCancel={handleCancelSale}
+            onSettleStock={handleSettleSaleStock}
+            onPrintReceipt={setReceiptSale}
+            restoreStockOnCancel={restoreStockOnCancel}
+            canSettleStock={canEdit(companyContext?.perfil, "stock") && canOperateByLicense}
+          />
+        )}
         {activeModule === "produtos" && (
-          <ProductsModule products={products} onCreateProduct={handleCreateProduct} onImportProducts={handleImportProducts} onToggleProduct={handleToggleProduct} canManage={canEdit(companyContext?.perfil, "products") && canOperateByLicense} />
+          <ProductsModule products={products} onCreateProduct={handleCreateProduct} onImportInvoiceProducts={handleImportInvoiceProducts} canManage={canEdit(companyContext?.perfil, "products") && canOperateByLicense} />
         )}
         {activeModule === "estoque" && (
-          <StockModule products={products} movements={stockMovements} onCreateMovement={handleCreateStockMovement} canManage={canEdit(companyContext?.perfil, "stock") && canOperateByLicense} />
+          <StockModule products={products} />
         )}
         {activeModule === "clientes" && <CustomersModule customers={customers} onCreateCustomer={handleCreateCustomer} canManage={canEdit(companyContext?.perfil, "customers") && canOperateByLicense} />}
         {activeModule === "nfce" && <FiscalDocumentsModule documents={documents} onAction={triggerFiscalAction} onFiles={handleFiscalFiles} />}
@@ -1265,6 +1700,7 @@ export function App() {
           <UsersModule users={companyUsers} onCreateUser={handleCreateCompanyUser} onUpdateUser={handleUpdateCompanyUser} canManage={canEdit(companyContext?.perfil, "users") && canOperateByLicense} />
         )}
         {activeModule === "gerais" && <ProductionGeneralSettingsModule settings={generalSettings} onSave={handleSaveGeneralSettings} canManage={companyContext?.perfil === "admin"} />}
+        {receiptSale && <SaleReceiptModal sale={receiptSale} company={companyContext} onClose={() => setReceiptSale(null)} />}
       </main>
     </div>
   );
@@ -1278,12 +1714,12 @@ function LicenseBanner({ license, message }: { license: CompanyContext["license"
   return (
     <section className={`license-banner ${tone}`}>
       <div>
-        <span className="eyebrow">Licença SaaS</span>
+        <span className="eyebrow">LicenÃ§a SaaS</span>
         <strong>{license.planoNome} | {license.status}</strong>
-        <p>{message || "Operação liberada para venda, cadastros e movimentações."}</p>
+        <p>{message || "OperaÃ§Ã£o liberada para venda, cadastros e movimentaÃ§Ãµes."}</p>
       </div>
       <div className="license-banner-metrics">
-        <span>Usuários {license.usuariosAtivos}/{license.limiteUsuarios}</span>
+        <span>UsuÃ¡rios {license.usuariosAtivos}/{license.limiteUsuarios}</span>
         <span>Produtos {license.produtosAtivos}/{license.limiteProdutos}</span>
         <span>Vence {license.vencimento ?? license.fimTeste ?? "sem data"}</span>
       </div>
@@ -1320,7 +1756,7 @@ function LoginScreen({
           <img src="/strategic-core-mark-tight.png" alt="Strategic Core Systems" />
         </div>
         <div>
-          <span className="eyebrow">No Núcleo das Decisões Inteligentes.</span>
+          <span className="eyebrow">No NÃºcleo das DecisÃµes Inteligentes.</span>
           <h1>CoreFlow PDV</h1>
           <p>by Strategic Core Systems</p>
         </div>
@@ -1345,7 +1781,7 @@ function LoginScreen({
         {mode === "signup" && (
           <>
             <label>
-              Razão social
+              RazÃ£o social
               <input value={razaoSocial} onChange={(event) => setRazaoSocial(event.target.value)} required />
             </label>
             <label>
@@ -1375,14 +1811,14 @@ function LoginScreen({
           {mode === "login" ? "Entrar" : "Criar revendedor"}
         </button>
         <button type="button" className="text-button" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-          {mode === "login" ? "Criar conta de revendedor" : "Já tenho conta"}
+          {mode === "login" ? "Criar conta de revendedor" : "JÃ¡ tenho conta"}
         </button>
         {mode === "login" && (
           <button type="button" className="text-button">
             Esqueci minha senha
           </button>
         )}
-        {!isSupabaseConfigured && <p className="hint">Modo demonstração ativo até configurar o Supabase.</p>}
+        {!isSupabaseConfigured && <p className="hint">Modo demonstraÃ§Ã£o ativo atÃ© configurar o Supabase.</p>}
         {toast && <p className="form-error">{toast}</p>}
       </form>
     </main>
@@ -1407,7 +1843,7 @@ function CreateCompanyScreen({
           <img src="/strategic-core-mark-tight.png" alt="Strategic Core Systems" />
         </div>
         <div>
-          <span className="eyebrow">No Núcleo das Decisões Inteligentes.</span>
+          <span className="eyebrow">No NÃºcleo das DecisÃµes Inteligentes.</span>
           <h1>CoreFlow PDV</h1>
           <p>Crie a empresa inicial para ativar o isolamento multiempresa.</p>
         </div>
@@ -1426,7 +1862,7 @@ function CreateCompanyScreen({
         </div>
         <h2>Empresa do revendedor</h2>
         <label>
-          Razão social
+          RazÃ£o social
           <input value={razaoSocial} onChange={(event) => setRazaoSocial(event.target.value)} required />
         </label>
         <label>
@@ -1509,6 +1945,91 @@ function Sidebar({
   );
 }
 
+function SaleReceiptModal({
+  sale,
+  company,
+  onClose
+}: {
+  sale: SaleRecord;
+  company: CompanyContext | null;
+  onClose: () => void;
+}) {
+  const fiscalLabel =
+    sale.statusFiscal === "AUTORIZADA"
+      ? "NFC-e autorizada"
+      : sale.statusFiscal === "ENVIANDO"
+        ? "NFC-e em processamento"
+        : "Comprovante nao fiscal";
+
+  return (
+    <div className="modal-backdrop receipt-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="modal-card receipt-modal" role="dialog" aria-modal="true" aria-label="Comprovante de venda" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header no-print">
+          <div>
+            <span className="eyebrow">Cupom de venda</span>
+            <h2>Comprovante para impressao</h2>
+          </div>
+          <button className="icon-button" aria-label="Fechar" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="receipt-print-area">
+          <div className="receipt-header">
+            <strong>{company?.nomeFantasia || "CoreFlow PDV"}</strong>
+            <span>{company?.razaoSocial || "Strategic Core Systems"}</span>
+            {company?.cnpj && <span>CNPJ {company.cnpj}</span>}
+            {company?.endereco && <span>{company.endereco}</span>}
+          </div>
+
+          <div className="receipt-divider" />
+          <div className="receipt-meta">
+            <span>Venda: <strong>{sale.numero}</strong></span>
+            <span>Data: {sale.data}</span>
+            <span>Pagamento: {sale.formaPagamento}</span>
+            <span>Cliente: {sale.clienteCpf ? `CPF ${sale.clienteCpf}` : "Consumidor nao identificado"}</span>
+            <span>Status: {fiscalLabel}</span>
+          </div>
+          <div className="receipt-divider" />
+
+          <div className="receipt-items">
+            {sale.itens.map((item) => (
+              <div className="receipt-item" key={item.id}>
+                <strong>{item.descricao}</strong>
+                <span>{item.codigo}</span>
+                <span>{item.quantidade} x {formatMoney(item.valorUnitario)} {item.desconto > 0 ? `- desc. ${formatMoney(item.desconto)}` : ""}</span>
+                <b>{formatMoney(item.total)}</b>
+              </div>
+            ))}
+          </div>
+
+          <div className="receipt-divider" />
+          <div className="receipt-totals">
+            <span>Subtotal <strong>{formatMoney(sale.subtotal)}</strong></span>
+            <span>Desconto <strong>{formatMoney(sale.descontoTotal)}</strong></span>
+            <span>Total <strong>{formatMoney(sale.total)}</strong></span>
+          </div>
+          <div className="receipt-divider" />
+          <p className="receipt-warning">
+            {sale.statusFiscal === "AUTORIZADA"
+              ? "Documento fiscal autorizado conforme dados da NFC-e vinculada."
+              : "Este comprovante nao substitui NFC-e modelo 65 autorizada pela SEFAZ."}
+          </p>
+          <p className="receipt-footer">CoreFlow PDV by Strategic Core Systems</p>
+        </div>
+
+        <div className="modal-actions no-print">
+          <button className="secondary-button" type="button" onClick={onClose}>Fechar</button>
+          <button className="primary-button" type="button" onClick={() => window.print()}>
+            <Printer size={16} />
+            Imprimir
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function Dashboard({
   products,
   documents,
@@ -1542,12 +2063,12 @@ function Dashboard({
         <Kpi title="Cupons rejeitados" value={String(rejected)} icon={AlertTriangle} tone={rejected ? "danger" : "neutral"} />
         <Kpi title="Estoque baixo" value={String(lowStock)} icon={Boxes} tone={lowStock ? "warning" : "neutral"} />
         <Kpi title="Total de clientes" value="1.284" icon={Users} />
-        <Kpi title="Ticket médio" value={formatMoney(averageTicket)} icon={CreditCard} />
-        <Kpi title="Pagamento líder" value="Pix 42%" icon={DatabaseZap} />
+        <Kpi title="Ticket mÃ©dio" value={formatMoney(averageTicket)} icon={CreditCard} />
+        <Kpi title="Pagamento lÃ­der" value="Pix 42%" icon={DatabaseZap} />
       </div>
 
       <div className="chart-grid">
-        <Panel title="Vendas por período" icon={BarChart3}>
+        <Panel title="Vendas por perÃ­odo" icon={BarChart3}>
           <BarSeries values={[48, 64, 52, 76, 92, 88, 106]} />
         </Panel>
         <Panel title="Status fiscal das NFC-e" icon={FileBadge}>
@@ -1556,9 +2077,9 @@ function Dashboard({
         <Panel title="Produtos mais vendidos" icon={Layers3}>
           <RankList
             rows={[
-              ["Café Premium Torrado 500g", "128 un"],
+              ["CafÃ© Premium Torrado 500g", "128 un"],
               ["Detergente Neutro 500ml", "94 un"],
-              ["Açúcar Cristal 1kg", "86 un"],
+              ["AÃ§Ãºcar Cristal 1kg", "86 un"],
               ["Fone Bluetooth Compact", "23 un"]
             ]}
           />
@@ -1591,19 +2112,19 @@ function buildCompanyOnboarding({
 
   const items = [
     { label: "Empresa criada", done: Boolean(company), detail: company?.nomeFantasia ?? "Cadastro inicial pendente" },
-    { label: "Licença operacional", done: licenseOk, detail: company?.license ? `${company.license.planoNome} | ${company.license.status}` : "Sem licença" },
-    { label: "Usuário admin", done: users.some((user) => user.perfil === "admin" && user.ativo), detail: `${users.length} usuário(s) ativo(s)` },
+    { label: "LicenÃ§a operacional", done: licenseOk, detail: company?.license ? `${company.license.planoNome} | ${company.license.status}` : "Sem licenÃ§a" },
+    { label: "UsuÃ¡rio admin", done: users.some((user) => user.perfil === "admin" && user.ativo), detail: `${users.length} usuÃ¡rio(s) ativo(s)` },
     { label: "Produtos cadastrados", done: hasProducts, detail: `${products.length} produto(s)` },
-    { label: "Estoque configurado", done: hasStock, detail: hasStock ? "Há produtos com saldo" : "Informe saldo inicial" },
+    { label: "Estoque configurado", done: hasStock, detail: hasStock ? "HÃ¡ produtos com saldo" : "Informe saldo inicial" },
     { label: "Clientes opcionais", done: customers.length > 0, detail: `${customers.length} cliente(s)` },
     { label: "Fiscal preparado", done: fiscalReady, detail: fiscalReady ? "Certificado e CSC configurados" : "Pode ficar para a etapa final" }
   ];
 
   const done = items.filter((item) => item.done).length;
   let status = "Cadastro iniciado";
-  if (!licenseOk) status = "Bloqueado por licença";
+  if (!licenseOk) status = "Bloqueado por licenÃ§a";
   else if (hasProducts && hasStock) status = fiscalReady ? "Pronto para vender e emitir" : "Pronto para vender | fiscal pendente";
-  else if (done >= 3) status = "Configuração em andamento";
+  else if (done >= 3) status = "ConfiguraÃ§Ã£o em andamento";
 
   return {
     done,
@@ -1620,13 +2141,13 @@ function OnboardingAssistant({
   progress: ReturnType<typeof buildCompanyOnboarding>;
 }) {
   return (
-    <Panel title="Assistente de implantação" icon={ClipboardList}>
+    <Panel title="Assistente de implantaÃ§Ã£o" icon={ClipboardList}>
       <div className="onboarding-assistant">
         <div className="onboarding-score">
           <strong>{progress.percent}%</strong>
           <span>{progress.status}</span>
         </div>
-        <div className="progress-track" aria-label={`Implantação ${progress.percent}%`}>
+        <div className="progress-track" aria-label={`ImplantaÃ§Ã£o ${progress.percent}%`}>
           <span style={{ width: `${progress.percent}%` }} />
         </div>
         <div className="checklist-grid">
@@ -1708,7 +2229,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
 
       {error && <div className="toast static">{error}</div>}
       {success && <div className="toast static">{success}</div>}
-      {loading && <Panel title="Carregando administração" icon={RefreshCcw}>Sincronizando dados globais.</Panel>}
+      {loading && <Panel title="Carregando administraÃ§Ã£o" icon={RefreshCcw}>Sincronizando dados globais.</Panel>}
 
       {!loading && (
         <>
@@ -1716,7 +2237,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
             <CoreAdminRetailerForm
               onSubmit={async (payload) => {
                 const result: any = await createRetailerFromCoreAdmin(payload);
-                setSuccess(`Revendedor criado. Senha temporária: ${result?.temporary_password ?? "definida manualmente"}`);
+                setSuccess(`Revendedor criado. Senha temporÃ¡ria: ${result?.temporary_password ?? "definida manualmente"}`);
                 await refresh();
               }}
               onError={setError}
@@ -1725,7 +2246,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
               companies={companies}
               onSubmit={async (payload) => {
                 const result: any = await createUserFromCoreAdmin(payload);
-                setSuccess(`Usuário criado. Senha temporária: ${result?.temporary_password ?? "definida manualmente"}`);
+                setSuccess(`UsuÃ¡rio criado. Senha temporÃ¡ria: ${result?.temporary_password ?? "definida manualmente"}`);
                 await refresh();
               }}
               onError={setError}
@@ -1734,7 +2255,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
               companies={companies}
               onSubmit={async (payload) => {
                 await upsertDomainFromCoreAdmin(payload);
-                setSuccess("Domínio cadastrado/atualizado.");
+                setSuccess("DomÃ­nio cadastrado/atualizado.");
                 await refresh();
               }}
               onError={setError}
@@ -1743,20 +2264,20 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
 
           <div className="kpi-grid">
             <Kpi title="Empresas ativas" value={String(activeCompanies)} icon={Building2} tone="success" />
-            <Kpi title="Usuários vinculados" value={String(users.length)} icon={Users} />
-            <Kpi title="Domínios ativos" value={`${activeDomains}/${domains.length}`} icon={DatabaseZap} tone={pendingDomains ? "warning" : "success"} />
+            <Kpi title="UsuÃ¡rios vinculados" value={String(users.length)} icon={Users} />
+            <Kpi title="DomÃ­nios ativos" value={`${activeDomains}/${domains.length}`} icon={DatabaseZap} tone={pendingDomains ? "warning" : "success"} />
             <Kpi title="Admins ativos" value={String(adminUsers)} icon={ShieldCheck} />
-            <Kpi title="Sem domínio" value={String(companiesWithoutDomain)} icon={Store} tone={companiesWithoutDomain ? "warning" : "success"} />
-            <Kpi title="Licenças em teste" value={String(trialLicenses)} icon={BadgeCheck} tone="info" />
-            <Kpi title="Licenças bloqueadas" value={String(blockedLicenses)} icon={LockKeyhole} tone={blockedLicenses ? "danger" : "success"} />
+            <Kpi title="Sem domÃ­nio" value={String(companiesWithoutDomain)} icon={Store} tone={companiesWithoutDomain ? "warning" : "success"} />
+            <Kpi title="LicenÃ§as em teste" value={String(trialLicenses)} icon={BadgeCheck} tone="info" />
+            <Kpi title="LicenÃ§as bloqueadas" value={String(blockedLicenses)} icon={LockKeyhole} tone={blockedLicenses ? "danger" : "success"} />
             <Kpi title="MRR estimado" value={formatMoney(recurringRevenue)} icon={CreditCard} />
             <Kpi title="A receber" value={formatMoney(receivableTotal)} icon={WalletCards} tone={receivableTotal ? "warning" : "success"} />
-            <Kpi title="Cobranças vencidas" value={String(overdueInvoices.length)} icon={AlertTriangle} tone={overdueInvoices.length ? "danger" : "success"} />
+            <Kpi title="CobranÃ§as vencidas" value={String(overdueInvoices.length)} icon={AlertTriangle} tone={overdueInvoices.length ? "danger" : "success"} />
             <Kpi title="Faturamento monitorado" value={formatMoney(totalRevenue)} icon={WalletCards} />
           </div>
 
           <div className="chart-grid">
-            <Panel title="Esteira de implantação" icon={ClipboardList}>
+            <Panel title="Esteira de implantaÃ§Ã£o" icon={ClipboardList}>
               <div className="onboarding-list">
                 {companies.slice(0, 6).map((company) => {
                   const companyDomains = domains.filter((domain: any) => domain.empresa_id === company.id);
@@ -1771,12 +2292,12 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
                     <article className="onboarding-row" key={company.id}>
                       <div>
                         <strong>{company.nomeFantasia}</strong>
-                        <span>{company.cnpj} | {percent}% | {readyToSell ? "Pronto para vender" : "Em implantação"}</span>
+                        <span>{company.cnpj} | {percent}% | {readyToSell ? "Pronto para vender" : "Em implantaÃ§Ã£o"}</span>
                       </div>
                       <span className={`badge ${hasAdmin ? "success" : "warning"}`}>Admin</span>
-                      <span className={`badge ${license ? "success" : "danger"}`}>Licença</span>
+                      <span className={`badge ${license ? "success" : "danger"}`}>LicenÃ§a</span>
                       <span className={`badge ${hasProducts ? "success" : "warning"}`}>Produtos</span>
-                      <span className={`badge ${companyDomains.length ? "info" : "neutral"}`}>Domínio</span>
+                      <span className={`badge ${companyDomains.length ? "info" : "neutral"}`}>DomÃ­nio</span>
                       <span className={`badge ${hasActiveDomain ? "success" : "warning"}`}>{hasActiveDomain ? "Ativo" : "Pendente"}</span>
                     </article>
                   );
@@ -1785,7 +2306,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
               </div>
             </Panel>
 
-            <Panel title="Matriz de permissões por cargo" icon={ShieldCheck}>
+            <Panel title="Matriz de permissÃµes por cargo" icon={ShieldCheck}>
               <RolePermissionMatrix />
             </Panel>
 
@@ -1794,7 +2315,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
               plans={plans}
               onSave={async (input) => {
                 await updateCompanyLicense(input);
-                setSuccess("Licença atualizada.");
+                setSuccess("LicenÃ§a atualizada.");
                 await refresh();
               }}
               onError={setError}
@@ -1804,7 +2325,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
               invoices={invoices}
               onRegisterPayment={async (input) => {
                 await registerBillingPayment(input);
-                setSuccess("Pagamento registrado e licença renovada.");
+                setSuccess("Pagamento registrado e licenÃ§a renovada.");
                 await refresh();
               }}
               onError={setError}
@@ -1812,7 +2333,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
 
             <Panel title="Empresas e revendedores" icon={Building2}>
               <ResponsiveTable
-                headers={["Empresa", "CNPJ", "UF", "Usuários", "Vendas", "NFC-e"]}
+                headers={["Empresa", "CNPJ", "UF", "UsuÃ¡rios", "Vendas", "NFC-e"]}
                 rows={companies.map((company) => [
                   company.nomeFantasia,
                   company.cnpj,
@@ -1824,7 +2345,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
               />
             </Panel>
 
-            <Panel title="Usuários e permissões" icon={UserCog}>
+            <Panel title="UsuÃ¡rios e permissÃµes" icon={UserCog}>
               <div className="access-list">
                 {users.map((user) => (
                   <div className="access-row" key={user.id}>
@@ -1850,7 +2371,7 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
                       className={user.ativo ? "secondary-button compact" : "primary-button compact"}
                       onClick={async () => {
                         await updateAccessFromCoreAdmin({ usuarios_empresas_id: user.id, ativo: !user.ativo });
-                        setSuccess(user.ativo ? "Usuário desativado." : "Usuário ativado.");
+                        setSuccess(user.ativo ? "UsuÃ¡rio desativado." : "UsuÃ¡rio ativado.");
                         await refresh();
                       }}
                     >
@@ -1861,9 +2382,9 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
               </div>
             </Panel>
 
-            <Panel title="Domínios por empresa" icon={Store}>
+            <Panel title="DomÃ­nios por empresa" icon={Store}>
               <ResponsiveTable
-                headers={["Domínio", "Empresa", "Status", "Observação"]}
+                headers={["DomÃ­nio", "Empresa", "Status", "ObservaÃ§Ã£o"]}
                 rows={domains.map((domain: any) => {
                   const company = Array.isArray(domain.empresas) ? domain.empresas[0] : domain.empresas;
                   return [
@@ -1878,8 +2399,8 @@ function SuperAdminModule({ profile }: { profile: SuperAdminProfile }) {
 
             <Panel title="Cargos globais Core Admin" icon={ShieldCheck}>
               <div className="status-list">
-                <StatusLine label="Owner" status="Acesso total, super admins e permissões" tone="success" />
-                <StatusLine label="Admin" status="Empresas, usuários, domínios e suporte" tone="info" />
+                <StatusLine label="Owner" status="Acesso total, super admins e permissÃµes" tone="success" />
+                <StatusLine label="Admin" status="Empresas, usuÃ¡rios, domÃ­nios e suporte" tone="info" />
                 <StatusLine label="Support" status="Atendimento e leitura operacional" tone="warning" />
                 <StatusLine label="Auditor" status="Somente leitura global" tone="muted" />
               </div>
@@ -1910,7 +2431,7 @@ function BillingPanel({
   const orderedInvoices = [...invoices].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
 
   return (
-    <Panel title="Cobranças e renovações" icon={WalletCards}>
+    <Panel title="CobranÃ§as e renovaÃ§Ãµes" icon={WalletCards}>
       <div className="billing-list">
         {orderedInvoices.slice(0, 8).map((invoice) => (
           <BillingRow
@@ -1920,7 +2441,7 @@ function BillingPanel({
             onError={onError}
           />
         ))}
-        {!orderedInvoices.length && <p className="empty-state">Nenhuma cobrança gerada ainda.</p>}
+        {!orderedInvoices.length && <p className="empty-state">Nenhuma cobranÃ§a gerada ainda.</p>}
       </div>
     </Panel>
   );
@@ -1966,19 +2487,19 @@ function BillingRow({
       <div className="billing-main">
         <strong>{formatMoney(invoice.valor)}</strong>
         <input type="date" value={form.pagoEm} disabled={paid} onChange={(event) => setForm({ ...form, pagoEm: event.target.value })} />
-        <input type="number" min={1} value={form.mesesRenovacao} disabled={paid} onChange={(event) => setForm({ ...form, mesesRenovacao: event.target.value })} aria-label="Meses de renovação" />
+        <input type="number" min={1} value={form.mesesRenovacao} disabled={paid} onChange={(event) => setForm({ ...form, mesesRenovacao: event.target.value })} aria-label="Meses de renovaÃ§Ã£o" />
         <select value={form.formaPagamento} disabled={paid} onChange={(event) => setForm({ ...form, formaPagamento: event.target.value })}>
           <option value="manual">Manual</option>
           <option value="pix">Pix</option>
           <option value="cartao">Cartão</option>
           <option value="boleto">Boleto</option>
-          <option value="transferencia">Transferência</option>
+          <option value="transferencia">TransferÃªncia</option>
         </select>
       </div>
 
       <div className="billing-main notes">
-        <input placeholder="Referência externa" value={form.referenciaExterna} disabled={paid} onChange={(event) => setForm({ ...form, referenciaExterna: event.target.value })} />
-        <input placeholder="Observação" value={form.observacao} disabled={paid} onChange={(event) => setForm({ ...form, observacao: event.target.value })} />
+        <input placeholder="ReferÃªncia externa" value={form.referenciaExterna} disabled={paid} onChange={(event) => setForm({ ...form, referenciaExterna: event.target.value })} />
+        <input placeholder="ObservaÃ§Ã£o" value={form.observacao} disabled={paid} onChange={(event) => setForm({ ...form, observacao: event.target.value })} />
         <button
           className="primary-button compact"
           disabled={paid}
@@ -2021,7 +2542,7 @@ function LicenseManagementPanel({
   onError: (message: string) => void;
 }) {
   return (
-    <Panel title="Planos e licenças dos revendedores" icon={CreditCard}>
+    <Panel title="Planos e licenÃ§as dos revendedores" icon={CreditCard}>
       <div className="license-list">
         {licenses.map((license) => (
           <LicenseRow
@@ -2032,7 +2553,7 @@ function LicenseManagementPanel({
             onError={onError}
           />
         ))}
-        {!licenses.length && <p className="empty-state">Nenhuma licença criada ainda.</p>}
+        {!licenses.length && <p className="empty-state">Nenhuma licenÃ§a criada ainda.</p>}
       </div>
     </Panel>
   );
@@ -2089,7 +2610,7 @@ function LicenseRow({
       <div className="license-heading">
         <div>
           <strong>{license.empresaNome}</strong>
-          <span>{license.cnpj} | {license.planoNome} | {formatMoney(license.precoMensal)}/mês</span>
+          <span>{license.cnpj} | {license.planoNome} | {formatMoney(license.precoMensal)}/mÃªs</span>
         </div>
         <span className={`badge ${license.status === "ativo" ? "success" : license.status === "bloqueado" || license.status === "vencido" ? "danger" : "warning"}`}>
           {license.status}
@@ -2105,19 +2626,19 @@ function LicenseRow({
           ))}
         </select>
         <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as CompanyLicense["status"] })}>
-          <option value="teste">Teste grátis</option>
+          <option value="teste">Teste grÃ¡tis</option>
           <option value="ativo">Ativo</option>
           <option value="vencido">Vencido</option>
           <option value="bloqueado">Bloqueado</option>
           <option value="cancelado">Cancelado</option>
         </select>
         <input type="date" value={form.vencimento} onChange={(event) => setForm({ ...form, vencimento: event.target.value })} />
-        <input type="number" min={1} value={form.limiteUsuarios} onChange={(event) => setForm({ ...form, limiteUsuarios: event.target.value })} aria-label="Limite de usuários" />
+        <input type="number" min={1} value={form.limiteUsuarios} onChange={(event) => setForm({ ...form, limiteUsuarios: event.target.value })} aria-label="Limite de usuÃ¡rios" />
         <input type="number" min={1} value={form.limiteProdutos} onChange={(event) => setForm({ ...form, limiteProdutos: event.target.value })} aria-label="Limite de produtos" />
       </div>
 
       <div className="license-controls notes">
-        <input placeholder="Observação interna" value={form.observacao} onChange={(event) => setForm({ ...form, observacao: event.target.value })} />
+        <input placeholder="ObservaÃ§Ã£o interna" value={form.observacao} onChange={(event) => setForm({ ...form, observacao: event.target.value })} />
         <input placeholder="Motivo do bloqueio" value={form.bloqueioMotivo} onChange={(event) => setForm({ ...form, bloqueioMotivo: event.target.value })} />
         <button
           className="primary-button compact"
@@ -2134,13 +2655,13 @@ function LicenseRow({
             }).catch((error) => onError(error.message))
           }
         >
-          Salvar licença
+          Salvar licenÃ§a
         </button>
       </div>
 
       <div className="license-usage">
         <span className={license.usuariosAtivos > Number(form.limiteUsuarios) ? "danger-text" : ""}>
-          Usuários {license.usuariosAtivos}/{form.limiteUsuarios}
+          UsuÃ¡rios {license.usuariosAtivos}/{form.limiteUsuarios}
         </span>
         <span className={license.produtosAtivos > Number(form.limiteProdutos) ? "danger-text" : ""}>
           Produtos {license.produtosAtivos}/{form.limiteProdutos}
@@ -2159,7 +2680,7 @@ function RolePermissionMatrix() {
     <div className="permission-matrix">
       <div className="permission-row header">
         <span>Cargo</span>
-        <span>Módulos liberados</span>
+        <span>MÃ³dulos liberados</span>
       </div>
       {roleOrder.map((role) => {
         const allowed = new Set(rolePermissions[role] ?? []);
@@ -2202,12 +2723,12 @@ function CoreAdminRetailerForm({
     <CoreAdminForm title="Criar revendedor" icon={Building2} onSubmit={() => onSubmit(form).catch((error) => onError(error.message))}>
       <input placeholder="E-mail admin" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
       <input placeholder="Nome do admin" value={form.nome_admin} onChange={(e) => setForm({ ...form, nome_admin: e.target.value })} />
-      <input placeholder="Razão social" value={form.razao_social} onChange={(e) => setForm({ ...form, razao_social: e.target.value })} required />
+      <input placeholder="RazÃ£o social" value={form.razao_social} onChange={(e) => setForm({ ...form, razao_social: e.target.value })} required />
       <input placeholder="Nome fantasia" value={form.nome_fantasia} onChange={(e) => setForm({ ...form, nome_fantasia: e.target.value })} required />
       <input placeholder="CNPJ" value={form.cnpj} onChange={(e) => setForm({ ...form, cnpj: e.target.value })} required />
       <div className="inline-fields">
         <input placeholder="UF" value={form.uf} onChange={(e) => setForm({ ...form, uf: e.target.value.toUpperCase() })} />
-        <input placeholder="Município" value={form.municipio} onChange={(e) => setForm({ ...form, municipio: e.target.value })} />
+        <input placeholder="MunicÃ­pio" value={form.municipio} onChange={(e) => setForm({ ...form, municipio: e.target.value })} />
       </div>
       <input placeholder="Senha inicial opcional" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
     </CoreAdminForm>
@@ -2232,7 +2753,7 @@ function CoreAdminUserForm({
   });
 
   return (
-    <CoreAdminForm title="Criar usuário" icon={UserCog} onSubmit={() => onSubmit(form).catch((error) => onError(error.message))}>
+    <CoreAdminForm title="Criar usuÃ¡rio" icon={UserCog} onSubmit={() => onSubmit(form).catch((error) => onError(error.message))}>
       <select value={form.empresa_id} onChange={(e) => setForm({ ...form, empresa_id: e.target.value })} required>
         <option value="">Empresa</option>
         {companies.map((company) => (
@@ -2272,7 +2793,7 @@ function CoreAdminDomainForm({
   });
 
   return (
-    <CoreAdminForm title="Cadastrar domínio" icon={Store} onSubmit={() => onSubmit(form).catch((error) => onError(error.message))}>
+    <CoreAdminForm title="Cadastrar domÃ­nio" icon={Store} onSubmit={() => onSubmit(form).catch((error) => onError(error.message))}>
       <select value={form.empresa_id} onChange={(e) => setForm({ ...form, empresa_id: e.target.value })} required>
         <option value="">Empresa</option>
         {companies.map((company) => (
@@ -2288,7 +2809,7 @@ function CoreAdminDomainForm({
         <option value="ativo">Ativo</option>
         <option value="bloqueado">Bloqueado</option>
       </select>
-      <input placeholder="Observação" value={form.observacao} onChange={(e) => setForm({ ...form, observacao: e.target.value })} />
+      <input placeholder="ObservaÃ§Ã£o" value={form.observacao} onChange={(e) => setForm({ ...form, observacao: e.target.value })} />
     </CoreAdminForm>
   );
 }
@@ -2348,6 +2869,13 @@ function PdvModule(props: {
   canSell: boolean;
   compactMode: boolean;
 }) {
+  const hasSearch = props.searchTerm.trim().length > 0;
+
+  function addProductAndClearSearch(product: Product) {
+    props.onAdd(product);
+    props.onSearch("");
+  }
+
   return (
     <section className={props.compactMode ? "pdv-layout pdv-compact" : "pdv-layout"}>
       <div className="pdv-products">
@@ -2357,7 +2885,13 @@ function PdvModule(props: {
             <input
               value={props.searchTerm}
               onChange={(event) => props.onSearch(event.target.value)}
-              placeholder="Buscar por código, código de barras ou nome"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && props.products.length === 1) {
+                  event.preventDefault();
+                  addProductAndClearSearch(props.products[0]);
+                }
+              }}
+              placeholder="Buscar por cÃ³digo, cÃ³digo de barras ou nome"
             />
           </label>
           <button className="secondary-button">
@@ -2369,6 +2903,9 @@ function PdvModule(props: {
           <p className="hint">Seu cargo permite consultar o PDV, mas nao finalizar vendas.</p>
         )}
 
+        {!hasSearch && <p className="empty-state">Aguardando busca do produto.</p>}
+        {hasSearch && !props.products.length && <p className="empty-state">Nenhum produto encontrado.</p>}
+        {hasSearch && props.products.length > 0 && (
         <div className="product-grid">
           {props.products.map((product) => {
             const fiscalIncomplete = !product.ncm || !product.cfop || (!product.csosn && !product.cst);
@@ -2386,13 +2923,14 @@ function PdvModule(props: {
                   </span>
                 </div>
                 {fiscalIncomplete && <span className="badge danger">Fiscal incompleto</span>}
-                <button className="primary-button compact" disabled={!props.canSell} onClick={() => props.onAdd(product)}>
+                <button className="primary-button compact" disabled={!props.canSell} onClick={() => addProductAndClearSearch(product)}>
                   Adicionar
                 </button>
               </article>
             );
           })}
         </div>
+        )}
       </div>
 
       <CartPanel {...props} />
@@ -2521,11 +3059,17 @@ function CartPanel(props: {
 function SalesHistoryModule({
   sales,
   onCancel,
-  restoreStockOnCancel
+  onSettleStock,
+  onPrintReceipt,
+  restoreStockOnCancel,
+  canSettleStock: canSettleStockPermission
 }: {
   sales: SaleRecord[];
   onCancel: (sale: SaleRecord, motivo: string) => void;
+  onSettleStock: (sale: SaleRecord) => void;
+  onPrintReceipt: (sale: SaleRecord) => void;
   restoreStockOnCancel: boolean;
+  canSettleStock: boolean;
 }) {
   const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
   const [cancelReason, setCancelReason] = useState("");
@@ -2572,6 +3116,7 @@ function SalesHistoryModule({
     selectedSale?.statusFiscal === "ENVIANDO" ||
     selectedSale?.statusFiscal === "CONTINGENCIA";
   const cancellable = selectedSale && selectedSale.statusVenda !== "CANCELADA" && !fiscalBlocksCancel;
+  const canSettleStock = Boolean(canSettleStockPermission && selectedSale && selectedSale.statusVenda !== "CANCELADA" && !selectedSale.estoqueBaixado);
   const canSubmitCancel = Boolean(cancellable && cancelReason.trim().length >= 10);
 
   useEffect(() => {
@@ -2587,7 +3132,7 @@ function SalesHistoryModule({
 
   return (
     <div className="sales-history-layout">
-      <Panel title="Histórico de vendas" icon={ReceiptText}>
+      <Panel title="HistÃ³rico de vendas" icon={ReceiptText}>
         <div className="sales-summary">
           <span>Vendas <strong>{filteredSales.length}</strong></span>
           <span>Total <strong>{formatMoney(totalSold)}</strong></span>
@@ -2659,7 +3204,7 @@ function SalesHistoryModule({
             >
               <div>
                 <strong>Venda {sale.numero}</strong>
-                <span>{sale.data} | {sale.clienteCpf ? `CPF ${sale.clienteCpf}` : "Consumidor não identificado"}</span>
+                <span>{sale.data} | {sale.clienteCpf ? `CPF ${sale.clienteCpf}` : "Consumidor nÃ£o identificado"}</span>
               </div>
               <span>{sale.formaPagamento}</span>
               <span className={`badge ${sale.statusVenda === "CANCELADA" ? "danger" : "success"}`}>{sale.statusVenda}</span>
@@ -2675,7 +3220,7 @@ function SalesHistoryModule({
         {selectedSale ? (
           <div className="sale-detail">
             <div className="status-list">
-              <StatusLine label="Número" status={selectedSale.numero} tone="info" />
+              <StatusLine label="NÃºmero" status={selectedSale.numero} tone="info" />
               <StatusLine label="Data" status={selectedSale.data} tone="muted" />
               <StatusLine label="Pagamento" status={selectedSale.formaPagamento} tone="info" />
               <StatusLine label="Status venda" status={selectedSale.statusVenda} tone={selectedSale.statusVenda === "CANCELADA" ? "danger" : "success"} />
@@ -2701,6 +3246,16 @@ function SalesHistoryModule({
               <span>Desconto <strong>{formatMoney(selectedSale.descontoTotal)}</strong></span>
               <span className="grand-total">Total <strong>{formatMoney(selectedSale.total)}</strong></span>
             </div>
+            <button className="primary-button full" disabled={!canSettleStock} onClick={() => onSettleStock(selectedSale)}>
+              Baixar estoque desta venda
+            </button>
+            <button className="secondary-button full" onClick={() => onPrintReceipt(selectedSale)}>
+              <Printer size={16} />
+              Imprimir comprovante
+            </button>
+            {!selectedSale.estoqueBaixado && selectedSale.statusVenda !== "CANCELADA" && (
+              <p className="hint">{canSettleStockPermission ? "Use esta aÃ§Ã£o quando a venda foi finalizada com baixa automÃ¡tica desativada." : "Seu cargo nÃ£o permite baixar estoque manualmente."}</p>
+            )}
             {selectedSale.motivoCancelamento && <p className="hint">Motivo: {selectedSale.motivoCancelamento}</p>}
             {cancellable && (
               <label className="input-stack">
@@ -2725,57 +3280,54 @@ function SalesHistoryModule({
 function ProductsModule({
   products,
   onCreateProduct,
-  onImportProducts,
-  onToggleProduct,
+  onImportInvoiceProducts,
   canManage
 }: {
   products: Product[];
   onCreateProduct: (input: Omit<ProductInput, "empresaId">) => void;
-  onImportProducts: (inputs: Omit<ProductInput, "empresaId">[]) => void;
-  onToggleProduct: (product: Product) => void;
+  onImportInvoiceProducts: (items: InvoiceProductImportInput[]) => void;
   canManage: boolean;
 }) {
+  const [isCreating, setIsCreating] = useState(false);
+
   return (
-    <div className="two-column">
+    <div className="module-grid">
       {canManage ? (
-        <div className="product-tools-column">
-          <ProductImportPanel onImportProducts={onImportProducts} />
-          <ProductForm onCreateProduct={onCreateProduct} />
-        </div>
+        <>
+          <div className="entry-actions">
+            <button className="primary-button compact" onClick={() => setIsCreating(true)}>
+              Novo produto
+            </button>
+          </div>
+          <ProductDocumentImportPanel products={products} onImportInvoiceProducts={onImportInvoiceProducts} />
+          {isCreating && (
+            <div className="modal-backdrop" role="presentation" onMouseDown={() => setIsCreating(false)}>
+              <section className="modal-card product-modal" role="dialog" aria-modal="true" aria-label="Novo produto" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="modal-header">
+                  <div>
+                    <span className="eyebrow">Entrada de notas</span>
+                    <h2>Novo produto</h2>
+                  </div>
+                  <button className="icon-button" aria-label="Fechar" onClick={() => setIsCreating(false)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <ProductForm
+                  onCreateProduct={(input) => {
+                    onCreateProduct(input);
+                    setIsCreating(false);
+                  }}
+                  embedded
+                />
+              </section>
+            </div>
+          )}
+        </>
       ) : (
-        <Panel title="Produtos" icon={Package}>
+        <Panel title="Entrada de notas" icon={Package}>
           <p className="hint">Seu cargo permite consultar produtos, mas nao cadastrar ou alterar status.</p>
         </Panel>
       )}
-      <Panel title="Cadastro de produtos" icon={Package}>
-        <FilterBar filters={["Nome", "Código", "Barras", "Categoria", "Ativos", "Estoque baixo", "Fiscal incompleto"]} />
-        <div className="product-admin-list">
-          {products.map((product) => {
-            const fiscalOk = Boolean(product.ncm && product.cfop && (product.csosn || product.cst));
-            return (
-              <article className="product-admin-row" key={product.id}>
-                <div>
-                  <span className="code">{product.codigo}</span>
-                  <strong>{product.descricao}</strong>
-                  <small>{product.categoria || "Sem categoria"} | {product.marca || "Sem marca"}</small>
-                </div>
-                <div>
-                  <strong>{formatMoney(product.precoVenda)}</strong>
-                  <small>Estoque {product.estoqueAtual} {product.unidade}</small>
-                </div>
-                <span className={`badge ${fiscalOk ? "success" : "danger"}`}>{fiscalOk ? "Fiscal completo" : "Fiscal incompleto"}</span>
-                <button
-                  className={product.ativo ? "secondary-button compact" : "primary-button compact"}
-                  disabled={!canManage}
-                  onClick={() => onToggleProduct(product)}
-                >
-                  {product.ativo ? "Inativar" : "Ativar"}
-                </button>
-              </article>
-            );
-          })}
-        </div>
-      </Panel>
     </div>
   );
 }
@@ -2806,7 +3358,7 @@ function ProductImportPanel({ onImportProducts }: { onImportProducts: (inputs: O
           Colunas aceitas: codigo, codigo_barras, descricao, categoria, marca, preco_custo, preco_venda, estoque_atual, estoque_minimo, unidade, ncm, cest, cfop, origem, csosn, cst.
         </p>
         <div className="import-summary">
-          <span className="badge success">{parsed.valid.length} válido(s)</span>
+          <span className="badge success">{parsed.valid.length} vÃ¡lido(s)</span>
           <span className={`badge ${parsed.errors.length ? "danger" : "neutral"}`}>{parsed.errors.length} erro(s)</span>
         </div>
         {parsed.errors.length > 0 && (
@@ -2827,14 +3379,171 @@ function ProductImportPanel({ onImportProducts }: { onImportProducts: (inputs: O
             setFileName("");
           }}
         >
-          Importar produtos válidos
+          Importar produtos vÃ¡lidos
         </button>
       </div>
     </Panel>
   );
 }
 
-function ProductForm({ onCreateProduct }: { onCreateProduct: (input: Omit<ProductInput, "empresaId">) => void }) {
+function ProductDocumentImportPanel({
+  products,
+  onImportInvoiceProducts
+}: {
+  products: Product[];
+  onImportInvoiceProducts: (items: InvoiceProductImportInput[]) => void;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [parsed, setParsed] = useState<StockXmlImport>({ items: [], errors: [] });
+  const [salePrices, setSalePrices] = useState<Record<string, string>>({});
+
+  function findExistingProduct(item: StockXmlItem) {
+    const code = item.codigo.trim().toLowerCase();
+    const barcode = item.codigoBarras?.trim().toLowerCase();
+    return products.find((product) => {
+      const productCode = product.codigo.trim().toLowerCase();
+      const productBarcode = product.codigoBarras?.trim().toLowerCase();
+      return productCode === code || Boolean(barcode && productBarcode === barcode);
+    });
+  }
+
+  function itemKey(item: StockXmlItem, index: number) {
+    return `${index}-${item.codigo}-${item.codigoBarras ?? ""}-${item.descricao}`;
+  }
+
+  function applyParsedImport(result: StockXmlImport) {
+    setParsed(result);
+    setSalePrices(
+      Object.fromEntries(
+        result.items.map((item, index) => {
+          const existing = findExistingProduct(item);
+          return [itemKey(item, index), existing?.precoVenda && existing.precoVenda > 0 ? String(existing.precoVenda) : ""];
+        })
+      )
+    );
+  }
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setFileName(file.name);
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      applyParsedImport(await parseStockPdf(file));
+      return;
+    }
+
+    applyParsedImport(parseStockXml(await file.text()));
+  }
+
+  const seenCodes = new Set<string>();
+  const candidates = parsed.items.map((item, index) => {
+    const key = itemKey(item, index);
+    const code = item.codigo.trim().toLowerCase();
+    const existingProduct = findExistingProduct(item);
+    const duplicatedInFile = seenCodes.has(code);
+    seenCodes.add(code);
+    const hasFiscal = Boolean(item.ncm);
+    const salePrice = parseCsvNumber(salePrices[key], NaN);
+    const hasSalePrice = Number.isFinite(salePrice) && salePrice > 0;
+    const canImport = !duplicatedInFile && hasSalePrice && Boolean(existingProduct || hasFiscal);
+
+    return { item, key, existingProduct, duplicatedInFile, hasFiscal, salePrice, hasSalePrice, canImport };
+  });
+  const importableItems: InvoiceProductImportInput[] = candidates
+    .filter((candidate) => candidate.canImport)
+    .map((candidate) => ({
+      ...candidate.item,
+      precoVenda: candidate.salePrice,
+      produtoId: candidate.existingProduct?.id,
+      produtoDescricao: candidate.existingProduct?.descricao,
+      documentoOrigem: parsed.chaveAcesso || parsed.numero || fileName || undefined
+    }));
+  const pendingPriceCount = candidates.filter((candidate) => !candidate.duplicatedInFile && Boolean(candidate.existingProduct || candidate.hasFiscal) && !candidate.hasSalePrice).length;
+  const blockedCount = candidates.length - importableItems.length;
+
+  return (
+    <Panel title="Importar produtos por XML/PDF" icon={FileText}>
+      <div className="import-box">
+        <label className="file-drop">
+          <input type="file" accept=".xml,.pdf,application/xml,text/xml,application/pdf" onChange={(event) => handleFile(event.target.files?.[0])} />
+          <span>{fileName || "Selecionar XML ou PDF da NF-e"}</span>
+        </label>
+        <p className="hint">Depois da leitura da nota, informe o valor de venda de cada item. Produto novo e criado com estoque inicial; produto ja cadastrado atualiza preco de venda e recebe entrada no estoque.</p>
+        <div className="import-summary">
+          <span className="badge success">{importableItems.length} pronto(s)</span>
+          <span className={`badge ${pendingPriceCount ? "warning" : "neutral"}`}>{pendingPriceCount} sem valor de venda</span>
+          <span className={`badge ${blockedCount ? "warning" : "neutral"}`}>{blockedCount} pendente(s)</span>
+          <span className={`badge ${parsed.errors.length ? "danger" : "neutral"}`}>{parsed.errors.length} erro(s)</span>
+        </div>
+        {(parsed.numero || parsed.emitente || parsed.total !== undefined) && (
+          <div className="status-list">
+            {parsed.numero && <StatusLine label="Nota" status={parsed.numero} tone="info" />}
+            {parsed.emitente && <StatusLine label="Emitente" status={parsed.emitente} tone="muted" />}
+            {parsed.total !== undefined && <StatusLine label="Valor XML/PDF" status={formatMoney(parsed.total)} tone="success" />}
+          </div>
+        )}
+        {parsed.errors.length > 0 && (
+          <div className="import-errors">
+            {parsed.errors.slice(0, 4).map((error) => (
+              <span key={error}>{error}</span>
+            ))}
+          </div>
+        )}
+        {candidates.length > 0 && (
+          <div className="xml-item-list">
+            {candidates.map(({ item, key, existingProduct, duplicatedInFile, hasFiscal, hasSalePrice }) => {
+              const status = duplicatedInFile
+                ? "Duplicado no arquivo"
+                : !existingProduct && !hasFiscal
+                  ? "Sem NCM"
+                  : !hasSalePrice
+                    ? "Informe venda"
+                    : existingProduct
+                      ? "Atualiza preco + estoque"
+                      : "Sera criado";
+              const tone = duplicatedInFile || (!existingProduct && !hasFiscal) || !hasSalePrice ? "warning" : "success";
+              return (
+                <article className="xml-item-row" key={key}>
+                  <div>
+                    <strong>{item.descricao}</strong>
+                    <span>
+                      {item.codigo} | NCM {item.ncm || "-"} | {item.quantidade} {item.unidade ?? "UN"} | Custo {formatMoney(item.valorUnitario)}
+                      {existingProduct ? ` | Atual ${formatMoney(existingProduct.precoVenda)} | Estoque ${existingProduct.estoqueAtual}` : ""}
+                    </span>
+                  </div>
+                  <input
+                    className="xml-price-input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Valor de venda"
+                    value={salePrices[key] ?? ""}
+                    onChange={(event) => setSalePrices((current) => ({ ...current, [key]: event.target.value }))}
+                  />
+                  <span className={`badge ${tone}`}>{status}</span>
+                </article>
+              );
+            })}
+          </div>
+        )}
+        <button
+          className="primary-button full"
+          type="button"
+          disabled={!importableItems.length || pendingPriceCount > 0}
+          onClick={() => {
+            onImportInvoiceProducts(importableItems);
+            setParsed({ items: [], errors: [] });
+            setSalePrices({});
+            setFileName("");
+          }}
+        >
+          Confirmar precos e lancar entrada
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+function ProductForm({ onCreateProduct, embedded = false }: { onCreateProduct: (input: Omit<ProductInput, "empresaId">) => void; embedded?: boolean }) {
   const [form, setForm] = useState({
     codigo: "",
     codigoBarras: "",
@@ -2856,8 +3565,7 @@ function ProductForm({ onCreateProduct }: { onCreateProduct: (input: Omit<Produc
     unidadeComercialFiscal: "UN"
   });
 
-  return (
-    <Panel title="Novo produto" icon={Package}>
+  const formContent = (
       <form
         className="entity-form"
         onSubmit={(event) => {
@@ -2885,9 +3593,9 @@ function ProductForm({ onCreateProduct }: { onCreateProduct: (input: Omit<Produc
           setForm((current) => ({ ...current, codigo: "", codigoBarras: "", descricao: "", precoVenda: "", ncm: "" }));
         }}
       >
-        <input required placeholder="Código interno" value={form.codigo} onChange={(e) => setForm({ ...form, codigo: e.target.value })} />
-        <input placeholder="Código de barras" value={form.codigoBarras} onChange={(e) => setForm({ ...form, codigoBarras: e.target.value })} />
-        <input required placeholder="Descrição" value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} />
+        <input required placeholder="CÃ³digo interno" value={form.codigo} onChange={(e) => setForm({ ...form, codigo: e.target.value })} />
+        <input placeholder="CÃ³digo de barras" value={form.codigoBarras} onChange={(e) => setForm({ ...form, codigoBarras: e.target.value })} />
+        <input required placeholder="DescriÃ§Ã£o" value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} />
         <div className="inline-fields">
           <input placeholder="Categoria" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })} />
           <input placeholder="Marca" value={form.marca} onChange={(e) => setForm({ ...form, marca: e.target.value })} />
@@ -2898,14 +3606,14 @@ function ProductForm({ onCreateProduct }: { onCreateProduct: (input: Omit<Produc
         </div>
         <div className="inline-fields">
           <input required type="number" min="0" step="0.001" placeholder="Estoque" value={form.estoqueAtual} onChange={(e) => setForm({ ...form, estoqueAtual: e.target.value })} />
-          <input required type="number" min="0" step="0.001" placeholder="Mínimo" value={form.estoqueMinimo} onChange={(e) => setForm({ ...form, estoqueMinimo: e.target.value })} />
+          <input required type="number" min="0" step="0.001" placeholder="MÃ­nimo" value={form.estoqueMinimo} onChange={(e) => setForm({ ...form, estoqueMinimo: e.target.value })} />
         </div>
         <div className="inline-fields">
           <input required placeholder="Unidade" value={form.unidade} onChange={(e) => setForm({ ...form, unidade: e.target.value.toUpperCase() })} />
           <input required placeholder="Unidade fiscal" value={form.unidadeComercialFiscal} onChange={(e) => setForm({ ...form, unidadeComercialFiscal: e.target.value.toUpperCase() })} />
         </div>
         <input required placeholder="NCM" value={form.ncm} onChange={(e) => setForm({ ...form, ncm: e.target.value })} />
-        <input placeholder="CEST quando aplicável" value={form.cest} onChange={(e) => setForm({ ...form, cest: e.target.value })} />
+        <input placeholder="CEST quando aplicÃ¡vel" value={form.cest} onChange={(e) => setForm({ ...form, cest: e.target.value })} />
         <div className="inline-fields">
           <input required placeholder="CFOP" value={form.cfop} onChange={(e) => setForm({ ...form, cfop: e.target.value })} />
           <input required placeholder="Origem" value={form.origem} onChange={(e) => setForm({ ...form, origem: e.target.value })} />
@@ -2914,68 +3622,24 @@ function ProductForm({ onCreateProduct }: { onCreateProduct: (input: Omit<Produc
           <input placeholder="CSOSN" value={form.csosn} onChange={(e) => setForm({ ...form, csosn: e.target.value })} />
           <input placeholder="CST" value={form.cst} onChange={(e) => setForm({ ...form, cst: e.target.value })} />
         </div>
-        <input type="number" min="0" step="0.01" placeholder="Alíquota ICMS" value={form.aliquotaIcms} onChange={(e) => setForm({ ...form, aliquotaIcms: e.target.value })} />
+        <input type="number" min="0" step="0.01" placeholder="AlÃ­quota ICMS" value={form.aliquotaIcms} onChange={(e) => setForm({ ...form, aliquotaIcms: e.target.value })} />
         <button className="primary-button full" type="submit">Cadastrar produto</button>
       </form>
+  );
+
+  if (embedded) return formContent;
+
+  return (
+    <Panel title="Novo produto" icon={Package}>
+      {formContent}
     </Panel>
   );
 }
 
-function StockModule({
-  products,
-  movements,
-  onCreateMovement,
-  canManage
-}: {
-  products: Product[];
-  movements: StockMovement[];
-  onCreateMovement: (input: { produtoId: string; tipo: string; quantidade: number; observacao?: string }) => void;
-  canManage: boolean;
-}) {
-  const [form, setForm] = useState({
-    produtoId: "",
-    tipo: "ENTRADA_MANUAL",
-    quantidade: "1",
-    observacao: ""
-  });
-
+function StockModule({ products }: { products: Product[] }) {
   return (
-    <div className="two-column">
+    <div className="module-grid">
       <Panel title="Estoque atual" icon={Boxes}>
-        {canManage ? (
-        <form
-          className="entity-form compact-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onCreateMovement({
-              produtoId: form.produtoId,
-              tipo: form.tipo,
-              quantidade: Number(form.quantidade),
-              observacao: form.observacao
-            });
-          }}
-        >
-          <select required value={form.produtoId} onChange={(event) => setForm({ ...form, produtoId: event.target.value })}>
-            <option value="">Produto</option>
-            {products.map((product) => (
-              <option value={product.id} key={product.id}>{product.descricao}</option>
-            ))}
-          </select>
-          <div className="inline-fields">
-            <select value={form.tipo} onChange={(event) => setForm({ ...form, tipo: event.target.value })}>
-              <option value="ENTRADA_MANUAL">Entrada manual</option>
-              <option value="SAIDA_MANUAL">Saída manual</option>
-              <option value="AJUSTE_POSITIVO">Ajuste positivo</option>
-              <option value="AJUSTE_NEGATIVO">Ajuste negativo</option>
-            </select>
-            <input type="number" min="0.001" step="0.001" value={form.quantidade} onChange={(event) => setForm({ ...form, quantidade: event.target.value })} />
-          </div>
-          <input placeholder="Observação" value={form.observacao} onChange={(event) => setForm({ ...form, observacao: event.target.value })} />
-          <button className="primary-button compact" type="submit">Registrar movimentação</button>
-        </form>
-        ) : (
-          <p className="hint">Seu cargo permite consultar estoque, mas nao registrar movimentacoes.</p>
-        )}
         <ResponsiveTable
           headers={["Produto", "Atual", "Mínimo", "Alerta"]}
           rows={products.map((product) => [
@@ -2986,30 +3650,118 @@ function StockModule({
           ])}
         />
       </Panel>
-      <Panel title="Movimentações recentes" icon={ClipboardList}>
-        <ResponsiveTable
-          headers={["Data", "Produto", "Tipo", "Qtd", "Saldo"]}
-          rows={(movements.length ? movements : [
-            {
-              id: "demo",
-              produtoId: "demo",
-              produtoDescricao: "Sem movimentações reais ainda",
-              tipo: "-",
-              quantidade: 0,
-              estoqueAnterior: 0,
-              estoquePosterior: 0,
-              createdAt: "-"
-            }
-          ]).map((movement) => [
-            movement.createdAt,
-            movement.produtoDescricao,
-            movement.tipo,
-            String(movement.quantidade),
-            `${movement.estoqueAnterior} -> ${movement.estoquePosterior}`
-          ])}
-        />
-      </Panel>
     </div>
+  );
+}
+
+function StockXmlImportPanel({
+  products,
+  onImportXml,
+  canManage
+}: {
+  products: Product[];
+  onImportXml: (items: StockXmlMovementInput[]) => void;
+  canManage: boolean;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [parsed, setParsed] = useState<StockXmlImport>({ items: [], errors: [] });
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setFileName(file.name);
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      setParsed(await parseStockPdf(file));
+      return;
+    }
+
+    setParsed(parseStockXml(await file.text()));
+  }
+
+  const matchedItems = parsed.items.map((item) => {
+    const code = item.codigo.trim().toLowerCase();
+    const barcode = item.codigoBarras?.trim().toLowerCase();
+    const product = products.find((candidate) => {
+      const productCode = candidate.codigo.trim().toLowerCase();
+      const productBarcode = candidate.codigoBarras?.trim().toLowerCase();
+      return productCode === code || Boolean(barcode && productBarcode === barcode);
+    });
+
+    return { ...item, product };
+  });
+  const importableItems: StockXmlMovementInput[] = matchedItems
+    .filter((item): item is StockXmlItem & { product: Product } => Boolean(item.product))
+    .map((item) => ({
+      codigo: item.codigo,
+      codigoBarras: item.codigoBarras,
+      descricao: item.descricao,
+      quantidade: item.quantidade,
+      valorUnitario: item.valorUnitario,
+      valorTotal: item.valorTotal,
+      unidade: item.unidade,
+      produtoId: item.product.id,
+      produtoDescricao: item.product.descricao,
+      documentoOrigem: parsed.chaveAcesso ?? parsed.numero
+    }));
+  const missingCount = matchedItems.length - importableItems.length;
+
+  return (
+    <Panel title="Importar XML/PDF da nota" icon={FileText}>
+      {canManage ? (
+        <div className="import-box">
+          <label className="file-drop">
+            <input type="file" accept=".xml,.pdf,application/xml,text/xml,application/pdf" onChange={(event) => handleFile(event.target.files?.[0])} />
+            <span>{fileName || "Selecionar XML ou PDF da NF-e"}</span>
+          </label>
+          <p className="hint">O sistema lÃª cÃ³digo, descriÃ§Ã£o, quantidade e valor dos itens no XML ou DANFE PDF. O vÃ­nculo Ã© feito pelo cÃ³digo interno ou cÃ³digo de barras do produto cadastrado.</p>
+          <div className="import-summary">
+            <span className="badge success">{importableItems.length} encontrado(s)</span>
+            <span className={`badge ${missingCount ? "warning" : "neutral"}`}>{missingCount} sem produto</span>
+            <span className={`badge ${parsed.errors.length ? "danger" : "neutral"}`}>{parsed.errors.length} erro(s)</span>
+          </div>
+          {(parsed.numero || parsed.emitente || parsed.total !== undefined) && (
+            <div className="status-list">
+              {parsed.numero && <StatusLine label="Nota" status={parsed.numero} tone="info" />}
+              {parsed.emitente && <StatusLine label="Emitente" status={parsed.emitente} tone="muted" />}
+              {parsed.total !== undefined && <StatusLine label="Valor XML" status={formatMoney(parsed.total)} tone="success" />}
+            </div>
+          )}
+          {parsed.errors.length > 0 && (
+            <div className="import-errors">
+              {parsed.errors.slice(0, 4).map((error) => (
+                <span key={error}>{error}</span>
+              ))}
+            </div>
+          )}
+          {matchedItems.length > 0 && (
+            <div className="xml-item-list">
+              {matchedItems.map((item) => (
+                <article className="xml-item-row" key={`${item.codigo}-${item.descricao}`}>
+                  <div>
+                    <strong>{item.descricao}</strong>
+                    <span>{item.codigo} | {item.quantidade} {item.unidade ?? "UN"} | Unit. {formatMoney(item.valorUnitario)} | Total {formatMoney(item.valorTotal)}</span>
+                  </div>
+                  <span className={`badge ${item.product ? "success" : "danger"}`}>{item.product ? item.product.descricao : "Produto nÃ£o encontrado"}</span>
+                </article>
+              ))}
+            </div>
+          )}
+          <button
+            className="primary-button full"
+            type="button"
+            disabled={!importableItems.length}
+            onClick={() => {
+              onImportXml(importableItems);
+              setParsed({ items: [], errors: [] });
+              setFileName("");
+            }}
+          >
+            LanÃ§ar entrada dos itens encontrados
+          </button>
+        </div>
+      ) : (
+        <p className="hint">Seu cargo permite consultar estoque, mas nÃ£o importar XML.</p>
+      )}
+    </Panel>
   );
 }
 
@@ -3030,43 +3782,93 @@ function CustomersModule({
     endereco: "",
     observacoes: ""
   });
+  const [isCreating, setIsCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const filteredCustomers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return customers;
+    return customers.filter((customer) =>
+      [customer.nome, customer.cpfCnpj ?? "", customer.telefone ?? "", customer.email ?? ""].some((value) =>
+        value.toLowerCase().includes(term)
+      )
+    );
+  }, [customers, search]);
+
+  function submitCustomer() {
+    onCreateCustomer(form);
+    setForm({ nome: "", cpfCnpj: "", telefone: "", email: "", endereco: "", observacoes: "" });
+    setIsCreating(false);
+  }
 
   return (
-    <div className="two-column">
-      <Panel title="Novo cliente" icon={Users}>
-        {canManage ? (
-        <form
-          className="entity-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onCreateCustomer(form);
-            setForm({ nome: "", cpfCnpj: "", telefone: "", email: "", endereco: "", observacoes: "" });
-          }}
-        >
-          <input required placeholder="Nome" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} />
-          <input placeholder="CPF/CNPJ" value={form.cpfCnpj} onChange={(e) => setForm({ ...form, cpfCnpj: e.target.value })} />
-          <input placeholder="Telefone" value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} />
-          <input type="email" placeholder="E-mail" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input placeholder="Endereço opcional" value={form.endereco} onChange={(e) => setForm({ ...form, endereco: e.target.value })} />
-          <input placeholder="Observações" value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} />
-          <button className="primary-button full" type="submit">Cadastrar cliente</button>
-        </form>
-        ) : (
-          <p className="hint">Seu cargo permite consultar clientes, mas nao cadastrar novos registros.</p>
-        )}
+    <div className="module-grid">
+      <Panel
+        title="Clientes"
+        icon={Users}
+        action={
+          <button className="primary-button compact" disabled={!canManage} onClick={() => setIsCreating(true)}>
+            Criar cliente
+          </button>
+        }
+      >
+        <div className="customer-toolbar">
+          <label className="search-box">
+            <Search size={18} />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, CPF/CNPJ, telefone ou e-mail" />
+          </label>
+          <span className="badge info">{filteredCustomers.length} cliente(s)</span>
+        </div>
+        {!canManage && <p className="hint">Seu cargo permite consultar clientes, mas nÃ£o cadastrar novos registros.</p>}
+        <div className="customer-list">
+          {filteredCustomers.map((customer) => (
+            <article className="customer-row" key={customer.id}>
+              <div>
+                <strong>{customer.nome}</strong>
+                <span>{customer.cpfCnpj || "CPF/CNPJ nÃ£o informado"}</span>
+              </div>
+              <span>{customer.telefone || "-"}</span>
+              <span>{customer.email || "-"}</span>
+              <small>{customer.endereco || "Sem endereÃ§o"}</small>
+            </article>
+          ))}
+          {!filteredCustomers.length && <p className="empty-state">Nenhum cliente encontrado.</p>}
+        </div>
       </Panel>
-      <Panel title="Clientes" icon={Users}>
-        <FilterBar filters={["Nome", "CPF/CNPJ", "Telefone", "E-mail"]} />
-        <ResponsiveTable
-          headers={["Nome", "CPF/CNPJ", "Telefone", "E-mail"]}
-          rows={(customers.length ? customers : []).map((customer) => [
-            customer.nome,
-            customer.cpfCnpj ?? "-",
-            customer.telefone ?? "-",
-            customer.email ?? "-"
-          ])}
-        />
-      </Panel>
+      {isCreating && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setIsCreating(false)}>
+          <section className="modal-card customer-modal" role="dialog" aria-modal="true" aria-label="Criar cliente" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">Cadastro comercial</span>
+                <h2>Criar cliente</h2>
+              </div>
+              <button className="icon-button" aria-label="Fechar" onClick={() => setIsCreating(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form
+              className="entity-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitCustomer();
+              }}
+            >
+              <input required placeholder="Nome ou razÃ£o social" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} />
+              <div className="inline-fields">
+                <input placeholder="CPF/CNPJ" value={form.cpfCnpj} onChange={(e) => setForm({ ...form, cpfCnpj: e.target.value })} />
+                <input placeholder="Telefone" value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} />
+              </div>
+              <input type="email" placeholder="E-mail" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              <input placeholder="EndereÃ§o opcional" value={form.endereco} onChange={(e) => setForm({ ...form, endereco: e.target.value })} />
+              <textarea placeholder="ObservaÃ§Ãµes" value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} />
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" onClick={() => setIsCreating(false)}>Cancelar</button>
+                <button className="primary-button" type="submit">Salvar cliente</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -3081,7 +3883,7 @@ function FiscalDocumentsModule({
   onFiles: (document: FiscalDocument) => void;
 }) {
   return (
-    <Panel title="Histórico fiscal NFC-e modelo 65" icon={ReceiptText}>
+    <Panel title="HistÃ³rico fiscal NFC-e modelo 65" icon={ReceiptText}>
       <FilterBar filters={["Data", "Cliente", "Pagamento", "Status fiscal"]} />
       <div className="document-list">
         {documents.map((document) => (
@@ -3089,7 +3891,7 @@ function FiscalDocumentsModule({
             <div>
               <span className="eyebrow">{document.venda} | {document.data}</span>
               <h3>{document.cliente}</h3>
-              <p>{document.cpf ?? "CPF não informado"} | {formatMoney(document.total)} | {document.formaPagamento}</p>
+              <p>{document.cpf ?? "CPF nÃ£o informado"} | {formatMoney(document.total)} | {document.formaPagamento}</p>
               {document.chave && <p className="mono">Chave {document.chave}</p>}
               {document.motivo && <p className="rejection">{document.motivo}</p>}
             </div>
@@ -3130,7 +3932,7 @@ function ReportsModule({ documents, products }: { documents: FiscalDocument[]; p
     <div className="module-grid">
       <FilterBar filters={["Data inicial", "Data final", "Operador", "Pagamento", "Status fiscal", "Exportar CSV"]} />
       <div className="chart-grid">
-        <Panel title="Faturamento diário" icon={BarChart3}>
+        <Panel title="Faturamento diÃ¡rio" icon={BarChart3}>
           <BarSeries values={[180, 220, 194, 288, 342, 316, 410]} />
         </Panel>
         <Panel title="Cupons autorizados e rejeitados" icon={FileText}>
@@ -3326,7 +4128,7 @@ function FiscalSettingsModule({
 
   return (
     <div className="two-column">
-      <Panel title="Configuração fiscal da empresa" icon={ShieldCheck}>
+      <Panel title="ConfiguraÃ§Ã£o fiscal da empresa" icon={ShieldCheck}>
         <form
           className="settings-grid"
           onSubmit={(event) => {
@@ -3351,16 +4153,16 @@ function FiscalSettingsModule({
                 setForm({ ...form, ambiente: event.target.value as "homologacao" | "producao" })
               }
             >
-              <option value="homologacao">Homologação</option>
-              <option value="producao">Produção</option>
+              <option value="homologacao">HomologaÃ§Ã£o</option>
+              <option value="producao">ProduÃ§Ã£o</option>
             </select>
           </label>
           <label>
-            Série NFC-e
+            SÃ©rie NFC-e
             <input value={form.serieNfce} onChange={(event) => setForm({ ...form, serieNfce: event.target.value })} />
           </label>
           <label>
-            Próximo número NFC-e
+            PrÃ³ximo nÃºmero NFC-e
             <input type="number" min={1} value={form.proximoNumeroNfce} onChange={(event) => setForm({ ...form, proximoNumeroNfce: event.target.value })} />
           </label>
           <label>
@@ -3369,30 +4171,30 @@ function FiscalSettingsModule({
           </label>
           <label>
             CSC/token NFC-e
-            <input type="password" value={form.cscToken} onChange={(event) => setForm({ ...form, cscToken: event.target.value })} placeholder={settings?.cscConfigurado ? "Já configurado. Preencha só para trocar." : "Armazenado somente no backend"} />
+            <input type="password" value={form.cscToken} onChange={(event) => setForm({ ...form, cscToken: event.target.value })} placeholder={settings?.cscConfigurado ? "JÃ¡ configurado. Preencha sÃ³ para trocar." : "Armazenado somente no backend"} />
           </label>
           <label>
             Certificado digital A1
-            <input value={form.certificadoPath} onChange={(event) => setForm({ ...form, certificadoPath: event.target.value })} placeholder={settings?.certificadoConfigurado ? "Já configurado. Preencha só para trocar." : "Caminho seguro no Storage/backend"} />
+            <input value={form.certificadoPath} onChange={(event) => setForm({ ...form, certificadoPath: event.target.value })} placeholder={settings?.certificadoConfigurado ? "JÃ¡ configurado. Preencha sÃ³ para trocar." : "Caminho seguro no Storage/backend"} />
           </label>
-          <button className="primary-button full" type="submit" disabled={!canManage}>Salvar configuração fiscal</button>
+          <button className="primary-button full" type="submit" disabled={!canManage}>Salvar configuraÃ§Ã£o fiscal</button>
         </form>
         {!canManage && <p className="hint">Seu cargo permite consultar a configuracao fiscal, mas nao alterar dados sensiveis.</p>}
         <p className="hint">O frontend nunca exibe CSC/token completo, senha de certificado ou service_role.</p>
       </Panel>
-      <Panel title="Indicadores de segurança fiscal" icon={KeyRound}>
+      <Panel title="Indicadores de seguranÃ§a fiscal" icon={KeyRound}>
         <div className="status-list">
-          <StatusLine label="Configuração fiscal" status={settings ? "Criada" : "Incompleta"} tone={settings ? "success" : "warning"} />
-          <StatusLine label="Certificado A1" status={settings?.certificadoConfigurado ? "Configurado" : "Não enviado"} tone={settings?.certificadoConfigurado ? "success" : "danger"} />
+          <StatusLine label="ConfiguraÃ§Ã£o fiscal" status={settings ? "Criada" : "Incompleta"} tone={settings ? "success" : "warning"} />
+          <StatusLine label="Certificado A1" status={settings?.certificadoConfigurado ? "Configurado" : "NÃ£o enviado"} tone={settings?.certificadoConfigurado ? "success" : "danger"} />
           <StatusLine label="CSC/token" status={settings?.cscConfigurado ? "Configurado e mascarado" : "Ausente"} tone={settings?.cscConfigurado ? "success" : "warning"} />
-          <StatusLine label="Ambiente" status={settings?.ambiente === "producao" ? "Produção" : "Homologação"} tone={settings?.ambiente === "producao" ? "danger" : "warning"} />
-          <StatusLine label="Edge Functions" status="Obrigatórias para NFC-e" tone="success" />
+          <StatusLine label="Ambiente" status={settings?.ambiente === "producao" ? "ProduÃ§Ã£o" : "HomologaÃ§Ã£o"} tone={settings?.ambiente === "producao" ? "danger" : "warning"} />
+          <StatusLine label="Edge Functions" status="ObrigatÃ³rias para NFC-e" tone="success" />
           <StatusLine label="API fiscal externa" status={apiStatus?.configured ? "Configurada" : "Secrets pendentes"} tone={apiStatus?.configured ? "success" : "danger"} />
           <StatusLine label="Provider fiscal" status={apiStatus?.provider ?? "-"} tone={apiStatus?.configured ? "info" : "muted"} />
           <StatusLine label="Host da API" status={apiStatus?.baseUrlHost ?? "-"} tone={apiStatus?.baseUrlConfigured ? "info" : "warning"} />
           <StatusLine label="Chave da API" status={apiStatus?.apiKeyConfigured ? "Configurada e oculta" : "Ausente"} tone={apiStatus?.apiKeyConfigured ? "success" : "danger"} />
           <StatusLine label="Health check" status={apiStatus?.healthCheckConfigured ? (apiStatus.healthCheckOk ? `OK ${apiStatus.healthCheckStatus ?? ""}` : "Falhou/sem resposta") : "Nao configurado"} tone={apiStatus?.healthCheckConfigured ? (apiStatus.healthCheckOk ? "success" : "warning") : "muted"} />
-          <StatusLine label="Última atualização" status={settings?.updatedAt ?? "-"} tone="muted" />
+          <StatusLine label="Ãšltima atualizaÃ§Ã£o" status={settings?.updatedAt ?? "-"} tone="muted" />
         </div>
         <p className="hint">Secrets esperadas: FISCAL_API_URL, FISCAL_API_KEY, FISCAL_PROVIDER_NAME e endpoints opcionais por operacao.</p>
       </Panel>
@@ -3527,7 +4329,7 @@ function CompanyModule() {
   return (
     <Panel title="Empresa e multiempresa" icon={Building2}>
       <div className="settings-grid">
-        {["Razão social", "Nome fantasia", "CNPJ", "Inscrição Estadual", "UF", "Município", "Endereço completo"].map((label) => (
+        {["RazÃ£o social", "Nome fantasia", "CNPJ", "InscriÃ§Ã£o Estadual", "UF", "MunicÃ­pio", "EndereÃ§o completo"].map((label) => (
           <label key={label}>
             {label}
             <input placeholder={label} />
@@ -3559,7 +4361,7 @@ function UsersModule({
 
   return (
     <div className="two-column">
-      <Panel title="Criar usuário da empresa" icon={UserCog}>
+      <Panel title="Criar usuÃ¡rio da empresa" icon={UserCog}>
         {canManage ? (
         <form
           className="entity-form"
@@ -3579,14 +4381,14 @@ function UsersModule({
             <option value="visualizador">Visualizador</option>
           </select>
           <input placeholder="Senha inicial opcional" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          <button className="primary-button full" type="submit">Criar usuário</button>
+          <button className="primary-button full" type="submit">Criar usuÃ¡rio</button>
         </form>
         ) : (
           <p className="hint">Seu cargo permite consultar usuarios, mas nao criar ou alterar acessos.</p>
         )}
       </Panel>
 
-      <Panel title="Usuários e acessos" icon={UserCog}>
+      <Panel title="UsuÃ¡rios e acessos" icon={UserCog}>
         <div className="access-list">
           {users.map((user) => (
             <div className="access-row" key={user.id}>
@@ -3614,7 +4416,7 @@ function UsersModule({
               </button>
             </div>
           ))}
-          {!users.length && <p className="empty-state">Nenhum usuário vinculado ainda.</p>}
+          {!users.length && <p className="empty-state">Nenhum usuÃ¡rio vinculado ainda.</p>}
         </div>
       </Panel>
     </div>
@@ -3656,7 +4458,7 @@ function ProductionGeneralSettingsModule({
 
   return (
     <div className="two-column">
-      <Panel title="Configurações gerais" icon={Settings}>
+      <Panel title="ConfiguraÃ§Ãµes gerais" icon={Settings}>
         <form
           className="entity-form"
           onSubmit={(event) => {
@@ -3667,21 +4469,21 @@ function ProductionGeneralSettingsModule({
           <div className="settings-toggle-list">
             <ToggleRow
               label="Permitir estoque negativo"
-              description="Mantém bloqueado para operação segura em produção."
+              description="MantÃ©m bloqueado para operaÃ§Ã£o segura em produÃ§Ã£o."
               checked={form.permitirEstoqueNegativo}
               disabled={!canManage}
               onChange={(checked) => setForm({ ...form, permitirEstoqueNegativo: checked })}
             />
             <ToggleRow
-              label="Impressão automática da NFC-e"
-              description="Usado depois da autorização fiscal pela API externa."
+              label="ImpressÃ£o automÃ¡tica da NFC-e"
+              description="Usado depois da autorizaÃ§Ã£o fiscal pela API externa."
               checked={form.impressaoAutomaticaNfce}
               disabled={!canManage}
               onChange={(checked) => setForm({ ...form, impressaoAutomaticaNfce: checked })}
             />
             <ToggleRow
-              label="Reimpressão de DANFE auditada"
-              description="Mantém rastreabilidade para documentos fiscais."
+              label="ReimpressÃ£o de DANFE auditada"
+              description="MantÃ©m rastreabilidade para documentos fiscais."
               checked={form.reimpressaoDanfeAuditada}
               disabled={!canManage}
               onChange={(checked) => setForm({ ...form, reimpressaoDanfeAuditada: checked })}
@@ -3695,14 +4497,14 @@ function ProductionGeneralSettingsModule({
             />
             <ToggleRow
               label="Cancelamento estorna estoque"
-              description="Define o comportamento padrão do cancelamento de venda."
+              description="Define o comportamento padrÃ£o do cancelamento de venda."
               checked={form.cancelamentoEstornaEstoque}
               disabled={!canManage}
               onChange={(checked) => setForm({ ...form, cancelamentoEstornaEstoque: checked })}
             />
             <ToggleRow
               label="PDV em modo compacto"
-              description="Otimiza a tela para balcão e dispositivos menores."
+              description="Otimiza a tela para balcÃ£o e dispositivos menores."
               checked={form.pdvModoCompacto}
               disabled={!canManage}
               onChange={(checked) => setForm({ ...form, pdvModoCompacto: checked })}
@@ -3726,7 +4528,7 @@ function ProductionGeneralSettingsModule({
               type="number"
               min="0"
               step="0.01"
-              placeholder="Sem limite obrigatório"
+              placeholder="Sem limite obrigatÃ³rio"
               value={form.exigirCpfAcimaDe ?? ""}
               disabled={!canManage}
               onChange={(event) =>
@@ -3738,28 +4540,28 @@ function ProductionGeneralSettingsModule({
             />
           </label>
           <label className="wide-field">
-            Observação operacional
+            ObservaÃ§Ã£o operacional
             <textarea
-              placeholder="Regras internas, política de balcão ou instruções para operadores."
+              placeholder="Regras internas, polÃ­tica de balcÃ£o ou instruÃ§Ãµes para operadores."
               value={form.observacao ?? ""}
               disabled={!canManage}
               onChange={(event) => setForm({ ...form, observacao: event.target.value })}
             />
           </label>
           <button className="primary-button full" type="submit" disabled={!canManage}>
-            Salvar configurações
+            Salvar configuraÃ§Ãµes
           </button>
-          {!canManage && <p className="hint">Seu cargo permite consultar, mas não alterar configurações gerais.</p>}
+          {!canManage && <p className="hint">Seu cargo permite consultar, mas nÃ£o alterar configuraÃ§Ãµes gerais.</p>}
         </form>
       </Panel>
 
-      <Panel title="Estado de produção" icon={ShieldCheck}>
+      <Panel title="Estado de produÃ§Ã£o" icon={ShieldCheck}>
         <div className="status-list">
           <StatusLine label="Estoque negativo" status={form.permitirEstoqueNegativo ? "Permitido" : "Bloqueado"} tone={form.permitirEstoqueNegativo ? "warning" : "success"} />
-          <StatusLine label="Baixa de estoque" status={form.baixaEstoqueAoFinalizar ? "Na finalização da venda" : "Manual"} tone={form.baixaEstoqueAoFinalizar ? "success" : "warning"} />
-          <StatusLine label="Cancelamento" status={form.cancelamentoEstornaEstoque ? "Estorna estoque" : "Sem estorno automático"} tone="info" />
+          <StatusLine label="Baixa de estoque" status={form.baixaEstoqueAoFinalizar ? "Na finalizaÃ§Ã£o da venda" : "Manual"} tone={form.baixaEstoqueAoFinalizar ? "success" : "warning"} />
+          <StatusLine label="Cancelamento" status={form.cancelamentoEstornaEstoque ? "Estorna estoque" : "Sem estorno automÃ¡tico"} tone="info" />
           <StatusLine label="NFC-e" status="Fiscal real via Edge Function" tone="success" />
-          <StatusLine label="Última atualização" status={form.updatedAt ?? "Ainda não salva"} tone="info" />
+          <StatusLine label="Ãšltima atualizaÃ§Ã£o" status={form.updatedAt ?? "Ainda nÃ£o salva"} tone="info" />
         </div>
       </Panel>
     </div>
@@ -3792,11 +4594,11 @@ function ToggleRow({
 
 function GeneralSettingsModule() {
   return (
-    <Panel title="Configurações gerais" icon={Settings}>
+    <Panel title="ConfiguraÃ§Ãµes gerais" icon={Settings}>
       <div className="status-list">
         <StatusLine label="Permitir estoque negativo" status="Desativado" tone="success" />
-        <StatusLine label="Reimpressão de DANFE" status="Com auditoria" tone="info" />
-        <StatusLine label="Baixa de estoque" status="Após confirmação da venda" tone="success" />
+        <StatusLine label="ReimpressÃ£o de DANFE" status="Com auditoria" tone="info" />
+        <StatusLine label="Baixa de estoque" status="ApÃ³s confirmaÃ§Ã£o da venda" tone="success" />
         <StatusLine label="Reenvio NFC-e" status="Sem duplicar estoque" tone="success" />
       </div>
     </Panel>
@@ -3883,8 +4685,8 @@ function PaymentBars() {
     <div className="payment-bars">
       {[
         ["Pix", 42],
-        ["Débito", 24],
-        ["Crédito", 21],
+        ["DÃ©bito", 24],
+        ["CrÃ©dito", 21],
         ["Dinheiro", 13]
       ].map(([label, value]) => (
         <div key={label}>
@@ -3957,3 +4759,4 @@ function StatusLine({ label, status, tone }: { label: string; status: string; to
     </div>
   );
 }
+

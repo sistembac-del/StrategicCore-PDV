@@ -220,6 +220,9 @@ export interface StockMovement {
   quantidade: number;
   estoqueAnterior: number;
   estoquePosterior: number;
+  valorUnitario?: number;
+  valorTotal?: number;
+  documentoOrigem?: string;
   observacao?: string;
   createdAt: string;
 }
@@ -808,6 +811,17 @@ export async function cancelRemoteSale(input: {
   return data;
 }
 
+export async function settleRemoteSaleStock(vendaId: string) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+
+  const { data, error } = await supabase.rpc("baixar_estoque_venda", {
+    p_venda_id: vendaId
+  });
+
+  if (error) throw error;
+  return data;
+}
+
 export async function createRemoteProduct(input: ProductInput) {
   if (!supabase) throw new Error("Supabase não configurado.");
 
@@ -826,6 +840,27 @@ export async function createRemoteProducts(inputs: ProductInput[]) {
   const { data, error } = await supabase.from("produtos").insert(payload).select("*");
   if (error) throw error;
   return (data ?? []).map(mapProduct);
+}
+
+export async function updateRemoteProductPricing(input: {
+  productId: string;
+  precoCusto: number;
+  precoVenda: number;
+}) {
+  if (!supabase) throw new Error("Supabase não configurado.");
+
+  const { data, error } = await supabase
+    .from("produtos")
+    .update({
+      preco_custo: input.precoCusto,
+      preco_venda: input.precoVenda
+    })
+    .eq("id", input.productId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return mapProduct(data);
 }
 
 function productInputToPayload(input: ProductInput) {
@@ -917,6 +952,9 @@ export async function loadRemoteStockMovements(empresaId: string): Promise<Stock
       quantidade: Number(row.quantidade ?? 0),
       estoqueAnterior: Number(row.estoque_anterior ?? 0),
       estoquePosterior: Number(row.estoque_posterior ?? 0),
+      valorUnitario: row.valor_unitario === null || row.valor_unitario === undefined ? undefined : Number(row.valor_unitario),
+      valorTotal: row.valor_total === null || row.valor_total === undefined ? undefined : Number(row.valor_total),
+      documentoOrigem: row.documento_origem ?? undefined,
       observacao: row.observacao ?? undefined,
       createdAt: new Date(row.created_at).toLocaleString("pt-BR")
     };
@@ -929,6 +967,9 @@ export async function createRemoteStockMovement(input: {
   tipo: string;
   quantidade: number;
   observacao?: string;
+  valorUnitario?: number;
+  valorTotal?: number;
+  documentoOrigem?: string;
 }) {
   if (!supabase) throw new Error("Supabase não configurado.");
 
@@ -937,7 +978,10 @@ export async function createRemoteStockMovement(input: {
     p_produto_id: input.produtoId,
     p_tipo: input.tipo,
     p_quantidade: input.quantidade,
-    p_observacao: input.observacao || null
+    p_observacao: input.observacao || null,
+    p_valor_unitario: input.valorUnitario ?? null,
+    p_valor_total: input.valorTotal ?? null,
+    p_documento_origem: input.documentoOrigem || null
   });
 
   if (error) throw error;
