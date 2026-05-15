@@ -26,6 +26,14 @@ export interface CompanyDomain {
   createdAt: string;
 }
 
+export interface DomainResolution {
+  empresaId: string;
+  dominio: string;
+  status: string;
+  nomeFantasia: string;
+  razaoSocial: string;
+}
+
 export interface RemoteAppData {
   company: CompanyContext | null;
   superAdmin: SuperAdminProfile | null;
@@ -297,14 +305,35 @@ const paymentFromDb: Record<string, PaymentMethod> = {
   OUTROS: "Outros"
 };
 
-export async function loadRemoteAppData(): Promise<RemoteAppData> {
+export async function resolveCompanyDomain(hostname: string): Promise<DomainResolution | null> {
+  if (!supabase) throw new Error("Supabase não configurado.");
+  const normalized = hostname.toLowerCase().replace(/^www\./, "").split(":")[0];
+  if (!normalized || normalized === "localhost" || normalized === "127.0.0.1" || normalized.endsWith(".pages.dev")) {
+    return null;
+  }
+
+  const { data, error } = await supabase.functions.invoke<{ data?: DomainResolution | null }>("resolve-domain", {
+    body: { hostname: normalized }
+  });
+
+  if (error) throw error;
+  return data?.data ?? null;
+}
+
+export async function loadRemoteAppData(preferredEmpresaId?: string): Promise<RemoteAppData> {
   if (!supabase) throw new Error("Supabase não configurado.");
 
-  const { data: memberships, error: membershipError } = await supabase
+  let membershipQuery = supabase
     .from("usuarios_empresas")
     .select("empresa_id, perfil, empresas(razao_social, nome_fantasia, cnpj, inscricao_estadual, regime_tributario, uf, municipio, endereco, ativo, created_at)")
     .eq("ativo", true)
     .limit(1);
+
+  if (preferredEmpresaId) {
+    membershipQuery = membershipQuery.eq("empresa_id", preferredEmpresaId);
+  }
+
+  const { data: memberships, error: membershipError } = await membershipQuery;
 
   if (membershipError) throw membershipError;
   const membership = memberships?.[0];
@@ -535,6 +564,8 @@ export async function createRetailerFromCoreAdmin(input: {
   cnpj: string;
   uf: string;
   municipio: string;
+  dominio?: string;
+  dominio_status?: string;
 }) {
   return invokeCoreAdminFunction("core-admin-create-retailer", input);
 }

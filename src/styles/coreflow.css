@@ -1093,6 +1093,10 @@ img {
   padding: 18px;
 }
 
+.core-admin-modal {
+  width: min(680px, 100%);
+}
+
 .modal-header,
 .modal-actions {
   display: flex;

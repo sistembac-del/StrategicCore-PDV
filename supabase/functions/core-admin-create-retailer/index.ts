@@ -14,8 +14,10 @@ Deno.serve(async (request) => {
     const razaoSocial = String(body.razao_social ?? "").trim();
     const nomeFantasia = String(body.nome_fantasia ?? "").trim();
     const cnpj = String(body.cnpj ?? "").replace(/\D/g, "");
+    const dominio = String(body.dominio ?? "").trim().toLowerCase();
+    const dominioStatus = String(body.dominio_status ?? "ativo").trim() || "ativo";
 
-    if (!email || !razaoSocial || !nomeFantasia || !cnpj) {
+    if (!email || !razaoSocial || !nomeFantasia || !cnpj || !dominio) {
       return jsonResponse({ error: "E-mail, razão social, nome fantasia e CNPJ são obrigatórios." }, 400);
     }
 
@@ -56,10 +58,23 @@ Deno.serve(async (request) => {
 
     if (linkError) throw linkError;
 
+    const { error: domainError } = await service.from("empresa_dominios").upsert(
+      {
+        empresa_id: empresa.id,
+        dominio,
+        status: dominioStatus,
+        observacao: "Criado junto com o revendedor/empresa."
+      },
+      { onConflict: "dominio" }
+    );
+
+    if (domainError) throw domainError;
+
     return jsonResponse({
       data: {
         empresa_id: empresa.id,
         user_id: userData.user.id,
+        dominio,
         email,
         temporary_password: password
       }

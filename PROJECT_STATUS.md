@@ -9,7 +9,7 @@ Este arquivo deve ser atualizado ao final de cada rodada de trabalho. Ele serve 
 ## Links
 
 - App principal: https://coreflow-pdv.pages.dev
-- Ultimo preview publicado: https://f504618f.coreflow-pdv.pages.dev
+- Ultimo preview publicado: https://30e124bf.coreflow-pdv.pages.dev
 - Supabase project ref: `mubggmlkvbucneqtwvsw`
 - Cloudflare Pages project: `coreflow-pdv`
 
@@ -24,10 +24,16 @@ Observacao: senhas e tokens nao devem ser registrados neste arquivo.
 ## Feito
 
 - Frontend React/Vite com identidade Strategic Core Systems e CoreFlow PDV.
+- Logo Strategic Core Systems atualizada para o arquivo `strategic-core-logo.png` com fundo transparente no login e menu lateral.
+- Slogan e textos principais do app corrigidos para remover acentos quebrados/mojibake.
 - Deploy no Cloudflare Pages.
 - Supabase conectado com Auth, Postgres, Storage, Edge Functions e RLS.
 - Estrutura multiempresa com `empresas` e `usuarios_empresas`.
 - Super Admin/Core Admin para criar revendedores, usuarios, dominios, licencas e cobrancas.
+- Core Admin ajustado: removidos os cards separados de criar usuario e cadastrar dominio; o fluxo "Criar revendedor / empresa" agora cria empresa, dono/admin e dominio de acesso no mesmo cadastro.
+- Core Admin agora mostra um botao "Criar revendedor / empresa" e abre o cadastro em modal para deixar a tela principal mais limpa.
+- Login por dominio implementado: Edge Function `resolve-domain` resolve o hostname para `empresa_id`, o app mostra o nome da empresa no login e, apos autenticar, carrega somente o vinculo do usuario naquela empresa.
+- Cadastro "Criar revendedor / empresa" agora usa a API publica de Localidades do IBGE para selecionar UF e municipio.
 - Login, dashboard, PDV, produtos, estoque, clientes, vendas, NFC-e, relatorios, fiscal, empresa, usuarios e configuracoes gerais.
 - PDV com finalizacao de venda, baixa de estoque e opcao de emissao NFC-e via Edge Function.
 - PDV agora nao lista produtos automaticamente ao abrir; produtos aparecem apenas apos busca/digitacao/bipagem, Enter adiciona quando houver um unico resultado e a busca limpa apos adicionar.
